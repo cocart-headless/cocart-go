@@ -1,0 +1,227 @@
+# Authentication
+
+**Authentication** is how your application proves to the server who is making the request. The server needs to know whether you're a guest shopper, a registered customer, or a store admin, so it can show you the right cart and allow the right actions.
+
+CoCart supports multiple authentication methods depending on the use case.
+
+## Guest Customers
+
+No authentication is needed for guest cart operations. A "guest" is someone shopping without logging in. The SDK automatically manages the guest session for you:
+
+1. **First request** — No cart key exists yet. The CoCart server creates a new guest session and returns a `Cart-Key` in the response header. This is a unique string (like `guest_abc123`) that identifies this particular guest's cart.
+2. **SDK extracts it** — The SDK reads the `Cart-Key` from the response and stores it automatically.
+3. **Subsequent requests** — The stored cart key is sent with every request so the server knows which cart to look up.
+
+```go
+import cocart "github.com/cocart-headless/cocart-sdk-go"
+
+client := cocart.NewClient("https://your-store.com")
+
+ctx := context.Background()
+
+// Add item — cart key is captured from the response automatically
+_, err := client.Cart().AddItem(ctx, 123, 2)
+
+fmt.Println(client.GetCartKey()) // "guest_abc123..."
+
+// Subsequent requests use the same cart
+cart, err := client.Cart().Get(ctx, nil)
+```
+
+### Resuming with a Known Cart Key
+
+If you already have a cart key, pass it directly:
+
+```go
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithCartKey("existing_cart_key"),
+)
+```
+
+## Basic Auth
+
+**Basic Authentication** is the simplest way to authenticate. It sends the username and password encoded in a header with every request. It should only be used over HTTPS (which encrypts the connection) to keep credentials safe.
+
+For authenticated customers using WordPress username/password:
+
+```go
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithBasicAuth("customer@email.com", "customer_password"),
+)
+
+// Or set at runtime
+client2 := cocart.NewClient("https://your-store.com")
+client2.SetAuth("customer@email.com", "password")
+
+// Check auth status
+client2.IsAuthenticated() // true
+client2.IsGuest()         // false
+```
+
+## JWT Authentication
+
+**JWT (JSON Web Token)** is a more secure authentication method. Instead of sending your password with every request, you log in once and receive a short-lived **token**. This token is sent with subsequent requests to prove your identity. When it expires, the SDK can automatically **refresh** it without asking the customer to log in again.
+
+If the [CoCart JWT Authentication](https://wordpress.org/plugins/cocart-jwt-authentication/) plugin (v3.0+) is installed, `JWT().Login()` acquires JWT tokens automatically. If the plugin is not installed, `JWT().Login()` returns an `*AuthenticationError`.
+
+### Login
+
+```go
+client := cocart.NewClient("https://your-store.com")
+
+ctx := context.Background()
+
+// Login via JWT (requires CoCart JWT Authentication plugin)
+response, err := client.JWT().Login(ctx, "customer@email.com", "password")
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(response.Get("display_name", "")) // "john"
+fmt.Println(response.Get("user_id", ""))       // "123"
+
+// Subsequent requests automatically use the acquired credentials
+cart, err := client.Cart().Get(ctx, nil)
+```
+
+### Logout
+
+```go
+err := client.Session().Logout(ctx)
+// Calls server logout endpoint, then clears local JWT and refresh tokens
+```
+
+### Refresh an Expired Token
+
+```go
+_, err := client.JWT().Refresh(ctx)
+```
+
+### Validate a Token
+
+```go
+valid, err := client.JWT().Validate(ctx)
+if valid {
+	fmt.Println("Token is valid")
+} else {
+	fmt.Println("Token is expired or invalid")
+}
+```
+
+### Check Token Expiry
+
+JWT tokens have a built-in expiration time. You can check locally (without contacting the server) whether the token has expired:
+
+```go
+// Check if expired (with 30-second default leeway)
+if client.JWT().IsTokenExpired() {
+	client.JWT().Refresh(ctx)
+}
+
+// Custom leeway (e.g., refresh 5 minutes before expiry)
+if client.JWT().IsTokenExpired(5 * time.Minute) {
+	client.JWT().Refresh(ctx)
+}
+
+// Get the expiry time
+expiry := client.JWT().GetTokenExpiry()
+if expiry != nil {
+	fmt.Println("Token expires at:", expiry.Format(time.RFC3339))
+}
+```
+
+### Auto-Refresh
+
+The SDK automatically refreshes expired tokens on 401 responses if a refresh token is available. When you call `JWT().Login()`, both tokens are stored and auto-refresh is enabled transparently.
+
+If you set tokens manually, provide both the access token and refresh token:
+
+```go
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithJWTToken("eyJ..."),
+	cocart.WithJWTRefreshToken("refresh_hash_..."),
+)
+
+// Expired tokens are refreshed and retried automatically on 401
+cart, err := client.Cart().Get(ctx, nil)
+```
+
+### JWT Utility Methods
+
+```go
+client.JWT().HasTokens()        // true if a JWT token is set
+client.JWT().IsTokenExpired()   // true if token is expired (local check)
+client.JWT().GetTokenExpiry()   // *time.Time of token expiry (nil if no token)
+client.JWT().ClearTokens()      // clear all JWT tokens
+```
+
+## Consumer Keys (Admin)
+
+**Consumer keys** are API credentials generated in the WooCommerce admin panel (WooCommerce > Settings > Advanced > REST API). They are meant for server-to-server access and administrative operations like managing cart sessions.
+
+For admin-only endpoints like the Sessions API, use WooCommerce REST API credentials:
+
+```go
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithWooCommerceKeys("ck_xxxxx", "cs_xxxxx"),
+)
+
+sessions, err := client.Sessions().All(ctx, nil)
+```
+
+## Custom Auth Header Name
+
+Some hosting providers or reverse proxies strip the `Authorization` header. You can configure the SDK to send credentials under a different header name:
+
+```go
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithAuthHeaderName("X-Auth-Token"),
+	cocart.WithBasicAuth("customer@email.com", "password"),
+)
+// Sends: X-Auth-Token: Basic <base64>
+```
+
+This works with all auth methods (Basic Auth, JWT, Consumer Keys):
+
+```go
+// JWT with custom header
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithAuthHeaderName("X-Auth-Token"),
+	cocart.WithJWTToken("eyJ..."),
+)
+// Sends: X-Auth-Token: Bearer eyJ...
+```
+
+You can also set it at runtime:
+
+```go
+client := cocart.NewClient("https://your-store.com").
+	SetAuthHeaderName("X-Auth-Token").
+	SetAuth("user", "pass")
+```
+
+## Authentication Priority
+
+If you configure multiple authentication methods, the SDK uses this priority order:
+
+1. **JWT Token** (`WithJWTToken`) — Bearer token
+2. **Basic Auth** (`WithBasicAuth`) — Basic auth header
+3. **Consumer Keys** (`WithWooCommerceKeys`) — Basic auth header
+
+### Switching Auth at Runtime
+
+```go
+// Start with JWT
+client := cocart.NewClient("https://your-store.com",
+	cocart.WithJWTToken("eyJ..."),
+)
+
+// Switch to Basic Auth
+client.SetAuth("user", "pass")
+
+// Switch to JWT
+client.SetJWTToken("new.jwt.token")
+
+// Clear everything
+client.JWT().ClearTokens()
+```
