@@ -173,6 +173,22 @@ client := cocart.NewClient("https://your-store.com",
 )
 ```
 
+## Event System
+
+Register callbacks for request/response lifecycle events. These are useful for logging, metrics, or debugging:
+
+```go
+client.OnRequest(func(e cocart.RequestEvent) {
+	fmt.Printf("%s %s\n", e.Method, e.URL)
+})
+client.OnResponse(func(e cocart.ResponseEvent) {
+	fmt.Printf("%d in %dms\n", e.Status, e.Duration.Milliseconds())
+})
+client.OnError(func(e cocart.ErrorEvent) {
+	fmt.Println("Error:", e.Err)
+})
+```
+
 ## Debug Mode
 
 Enable debug mode to log request/response details to stderr:
