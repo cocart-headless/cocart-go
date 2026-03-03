@@ -23,6 +23,10 @@ Official Go SDK for the [CoCart](https://cocartapi.com) REST API.
 - **CoCart plugin** installed on your WooCommerce store — This is the WordPress plugin that provides the REST API endpoints the SDK communicates with.
 - [CoCart JWT Authentication](https://wordpress.org/plugins/cocart-jwt-authentication/) plugin for JWT features (optional) — Only needed if you want to use JSON Web Token authentication (explained in the [Authentication](docs/authentication.md) guide).
 
+## Support Policy
+
+See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Go versions, and support lifecycle.
+
 ## Features
 
 - Zero external dependencies — uses only the Go standard library
