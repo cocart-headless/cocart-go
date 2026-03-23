@@ -118,6 +118,50 @@ func (j *JWTManager) Login(ctx context.Context, username, password string) (*Res
 	return resp, nil
 }
 
+// LoginWith2FA completes a login after a [*TwoFactorRequiredError].
+//
+// Call this after catching [*TwoFactorRequiredError] from [JWTManager.Login].
+// Submits the verification code and an optional provider to acquire JWT tokens.
+// If provider is omitted or empty, the server uses its default.
+func (j *JWTManager) LoginWith2FA(ctx context.Context, username, password, code string, provider ...string) (*Response, error) {
+	payload := map[string]any{
+		"username": username,
+		"password": password,
+		"2fa_code": code,
+	}
+	if len(provider) > 0 && provider[0] != "" {
+		payload["2fa_provider"] = provider[0]
+	}
+
+	resp, err := j.client.Post(ctx, "login", payload)
+	if err != nil {
+		return resp, err
+	}
+
+	data := resp.ToObject()
+	extras, _ := data["extras"].(map[string]any)
+	jwtToken, _ := extras["jwt_token"].(string)
+	refreshToken, _ := extras["jwt_refresh"].(string)
+
+	if jwtToken != "" {
+		j.client.SetJWTToken(jwtToken)
+		if refreshToken != "" {
+			j.client.SetRefreshToken(refreshToken)
+		}
+		if err := j.persistTokens(); err != nil {
+			return resp, err
+		}
+	} else {
+		return resp, NewAuthenticationError(
+			"JWT token not found in 2FA login response. Is the CoCart JWT Authentication plugin installed?",
+			0,
+			"cocart_jwt_missing",
+		)
+	}
+
+	return resp, nil
+}
+
 // Refresh refreshes the JWT access token using the refresh token.
 func (j *JWTManager) Refresh(ctx context.Context, refreshToken ...string) (*Response, error) {
 	return j.doRefreshWithContext(ctx, refreshToken...)
@@ -192,7 +236,8 @@ func (j *JWTManager) WithAutoRefreshCallback(ctx context.Context, fn func(ctx co
 	err := fn(ctx, j.client)
 	if err != nil {
 		var authErr *AuthenticationError
-		if errors.As(err, &authErr) && !j.isRefreshing && j.client.GetRefreshToken() != "" {
+		var twoFactorErr *TwoFactorRequiredError
+		if errors.As(err, &authErr) && !errors.As(err, &twoFactorErr) && !j.isRefreshing && j.client.GetRefreshToken() != "" {
 			j.mu.Lock()
 			j.isRefreshing = true
 			j.mu.Unlock()

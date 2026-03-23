@@ -848,6 +848,11 @@ func (c *Client) handleErrorResponse(resp *Response, method, reqURL string) erro
 
 	httpCode := resp.StatusCode
 
+	// 2FA challenge (checked before generic 401 handling)
+	if code == "cocart_2fa_required" {
+		return NewTwoFactorRequiredError(message, data)
+	}
+
 	// Authentication errors
 	if httpCode == 401 || httpCode == 403 || strings.Contains(code, "authenticat") {
 		return NewAuthenticationError(message, httpCode, code, data)
