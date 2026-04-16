@@ -801,6 +801,7 @@ func (c *Client) buildHeaders() map[string]string {
 	// Cart key header
 	if c.cartKey != "" && c.auth == nil && c.jwtToken == "" {
 		headers["Cart-Key"] = c.cartKey
+		headers["CoCart-API-Cart-Key"] = c.cartKey // Fallback for older plugin versions
 	}
 
 	// Custom headers (override defaults)
@@ -814,6 +815,9 @@ func (c *Client) buildHeaders() map[string]string {
 // extractCartKeyFromHeaders extracts and stores the Cart-Key from response headers.
 func (c *Client) extractCartKeyFromHeaders(resp *Response) {
 	cartKey := resp.GetHeader("Cart-Key")
+	if cartKey == "" {
+		cartKey = resp.GetHeader("CoCart-API-Cart-Key") // Fallback for older plugin versions
+	}
 	if cartKey != "" {
 		c.mu.Lock()
 		c.cartKey = cartKey
