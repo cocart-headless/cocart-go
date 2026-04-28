@@ -54,6 +54,7 @@ type Client struct {
 	// Lazy-loaded endpoint instances
 	jwtManager       *JWTManager
 	sessionManager   *SessionManager
+	accountEndpoint  *AccountEndpoint
 	cartEndpoint     *CartEndpoint
 	productsEndpoint *ProductsEndpoint
 	storeEndpoint    *StoreEndpoint
@@ -471,6 +472,16 @@ func (c *Client) Sessions() *SessionsEndpoint {
 	return c.sessionsEndpoint
 }
 
+// Account returns the account endpoint for customer profile, orders, downloads, and reviews.
+func (c *Client) Account() *AccountEndpoint {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.accountEndpoint == nil {
+		c.accountEndpoint = &AccountEndpoint{endpoint: endpoint{client: c}}
+	}
+	return c.accountEndpoint
+}
+
 // --- HTTP methods ---
 
 // Get makes an HTTP GET request to the API.
@@ -801,6 +812,7 @@ func (c *Client) buildHeaders() map[string]string {
 	// Cart key header
 	if c.cartKey != "" && c.auth == nil && c.jwtToken == "" {
 		headers["Cart-Key"] = c.cartKey
+		headers["CoCart-API-Cart-Key"] = c.cartKey // Fallback for older plugin versions
 	}
 
 	// Custom headers (override defaults)
@@ -814,6 +826,9 @@ func (c *Client) buildHeaders() map[string]string {
 // extractCartKeyFromHeaders extracts and stores the Cart-Key from response headers.
 func (c *Client) extractCartKeyFromHeaders(resp *Response) {
 	cartKey := resp.GetHeader("Cart-Key")
+	if cartKey == "" {
+		cartKey = resp.GetHeader("CoCart-API-Cart-Key") // Fallback for older plugin versions
+	}
 	if cartKey != "" {
 		c.mu.Lock()
 		c.cartKey = cartKey
@@ -847,6 +862,11 @@ func (c *Client) handleErrorResponse(resp *Response, method, reqURL string) erro
 	message := fmt.Sprintf("%s%s%s", context, apiMessage, codeLabel)
 
 	httpCode := resp.StatusCode
+
+	// 2FA challenge (checked before generic 401 handling)
+	if code == "cocart_2fa_required" {
+		return NewTwoFactorRequiredError(message, data)
+	}
 
 	// Authentication errors
 	if httpCode == 401 || httpCode == 403 || strings.Contains(code, "authenticat") {

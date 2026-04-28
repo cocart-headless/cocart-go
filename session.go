@@ -114,6 +114,27 @@ func (s *SessionManager) LoginWithJWT(ctx context.Context, username, password st
 	return loginResp, nil
 }
 
+// LoginWithJWT2FA completes a JWT login after a [*TwoFactorRequiredError].
+//
+// Call this after catching [*TwoFactorRequiredError] from [SessionManager.LoginWithJWT].
+// Pass an empty string for provider to use the server's default.
+func (s *SessionManager) LoginWithJWT2FA(ctx context.Context, username, password, code, provider string, mergeCart bool) (*Response, error) {
+	guestCartKey := s.client.GetCartKey()
+
+	loginResp, err := s.JWT().LoginWith2FA(ctx, username, password, code, provider)
+	if err != nil {
+		return loginResp, err
+	}
+
+	s.clearStoredCartKey()
+
+	if mergeCart && guestCartKey != "" {
+		_, _ = s.client.Cart().Get(ctx, &CartGetParams{CartKey: guestCartKey})
+	}
+
+	return loginResp, nil
+}
+
 // Logout clears all auth state and starts a new guest session.
 func (s *SessionManager) Logout(ctx context.Context) error {
 	if s.jwtManager != nil {

@@ -86,6 +86,57 @@ func NewValidationError(message string, httpCode int, errorCode string, response
 	}
 }
 
+// TwoFactorRequiredError is returned when the server requires a 2FA code to complete login.
+//
+// Returned by [JWTManager.Login] when the CoCart 2FA plugin is installed and the user
+// has 2FA enabled. Catch this error, inspect AvailableProviders and DefaultProvider,
+// prompt the user for a code, then call [JWTManager.LoginWith2FA] to complete login.
+type TwoFactorRequiredError struct {
+	AuthenticationError
+	// AvailableProviders lists the providers the user can use (e.g. "totp", "email", "backup").
+	AvailableProviders []string
+	// DefaultProvider is the provider the server will use if none is specified.
+	DefaultProvider string
+	// EmailSent indicates whether the server has already sent a code via email.
+	EmailSent bool
+}
+
+// Unwrap returns the embedded AuthenticationError for errors.As compatibility.
+func (e *TwoFactorRequiredError) Unwrap() error { return &e.AuthenticationError }
+
+// NewTwoFactorRequiredError creates a TwoFactorRequiredError from the API response data.
+func NewTwoFactorRequiredError(message string, data map[string]any) *TwoFactorRequiredError {
+	inner := data
+	if d, ok := data["data"].(map[string]any); ok {
+		inner = d
+	}
+
+	providers, _ := inner["available_providers"].([]any)
+	strProviders := make([]string, 0, len(providers))
+	for _, p := range providers {
+		if s, ok := p.(string); ok {
+			strProviders = append(strProviders, s)
+		}
+	}
+
+	defaultProvider, _ := inner["default_provider"].(string)
+	emailSent, _ := inner["email_sent"].(bool)
+
+	return &TwoFactorRequiredError{
+		AuthenticationError: AuthenticationError{
+			CoCartError: CoCartError{
+				Message:      message,
+				HTTPCode:     401,
+				ErrorCode:    "cocart_2fa_required",
+				ResponseData: data,
+			},
+		},
+		AvailableProviders: strProviders,
+		DefaultProvider:    defaultProvider,
+		EmailSent:          emailSent,
+	}
+}
+
 // VersionError represents a feature requiring CoCart Basic.
 type VersionError struct {
 	CoCartError
