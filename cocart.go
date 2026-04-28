@@ -54,6 +54,7 @@ type Client struct {
 	// Lazy-loaded endpoint instances
 	jwtManager       *JWTManager
 	sessionManager   *SessionManager
+	accountEndpoint  *AccountEndpoint
 	cartEndpoint     *CartEndpoint
 	productsEndpoint *ProductsEndpoint
 	storeEndpoint    *StoreEndpoint
@@ -469,6 +470,16 @@ func (c *Client) Sessions() *SessionsEndpoint {
 		c.sessionsEndpoint = &SessionsEndpoint{endpoint: endpoint{client: c, basePath: "sessions"}}
 	}
 	return c.sessionsEndpoint
+}
+
+// Account returns the account endpoint for customer profile, orders, downloads, and reviews.
+func (c *Client) Account() *AccountEndpoint {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.accountEndpoint == nil {
+		c.accountEndpoint = &AccountEndpoint{endpoint: endpoint{client: c}}
+	}
+	return c.accountEndpoint
 }
 
 // --- HTTP methods ---
