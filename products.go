@@ -28,7 +28,7 @@ func (e *ProductsEndpoint) Find(ctx context.Context, productID int, params ...Pr
 	return e.doGet(ctx, fmt.Sprintf("%d", productID), p)
 }
 
-// FindBySlug returns a single product by slug. Requires CoCart Basic.
+// FindBySlug returns a single product by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) FindBySlug(ctx context.Context, slug string, params ...ProductParams) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->findBySlug"); err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (e *ProductsEndpoint) Variations(ctx context.Context, productID int, params
 	return e.doGet(ctx, fmt.Sprintf("%d/variations", productID), p)
 }
 
-// Variation returns a specific variation. Requires CoCart Basic.
+// Variation returns a specific variation. Requires CoCart Starter.
 func (e *ProductsEndpoint) Variation(ctx context.Context, productID, variationID int, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->variation"); err != nil {
 		return nil, err
@@ -180,7 +180,7 @@ func (e *ProductsEndpoint) Categories(ctx context.Context, params ...*Pagination
 	return e.doGet(ctx, "categories", p)
 }
 
-// Category returns a single category. Requires CoCart Basic.
+// Category returns a single category. Requires CoCart Starter.
 func (e *ProductsEndpoint) Category(ctx context.Context, categoryID int, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->category"); err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func (e *ProductsEndpoint) Tags(ctx context.Context, params ...*PaginationParams
 	return e.doGet(ctx, "tags", p)
 }
 
-// Tag returns a single tag. Requires CoCart Basic.
+// Tag returns a single tag. Requires CoCart Starter.
 func (e *ProductsEndpoint) Tag(ctx context.Context, tagID int, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->tag"); err != nil {
 		return nil, err
@@ -237,7 +237,7 @@ func (e *ProductsEndpoint) AttributeTerm(ctx context.Context, attributeID, termI
 	return e.doGet(ctx, fmt.Sprintf("attributes/%d/terms/%d", attributeID, termID), params...)
 }
 
-// AttributeBySlug returns an attribute by slug. Requires CoCart Basic.
+// AttributeBySlug returns an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeBySlug(ctx context.Context, slug string, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->attributeBySlug"); err != nil {
 		return nil, err
@@ -245,7 +245,7 @@ func (e *ProductsEndpoint) AttributeBySlug(ctx context.Context, slug string, par
 	return e.doGet(ctx, "attributes/"+slug, params...)
 }
 
-// AttributeTermsBySlug returns terms for an attribute by slug. Requires CoCart Basic.
+// AttributeTermsBySlug returns terms for an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeTermsBySlug(ctx context.Context, slug string, params ...*PaginationParams) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->attributeTermsBySlug"); err != nil {
 		return nil, err
@@ -257,7 +257,7 @@ func (e *ProductsEndpoint) AttributeTermsBySlug(ctx context.Context, slug string
 	return e.doGet(ctx, "attributes/"+slug+"/terms", p)
 }
 
-// AttributeTermBySlug returns a term by slug for an attribute by slug. Requires CoCart Basic.
+// AttributeTermBySlug returns a term by slug for an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeTermBySlug(ctx context.Context, attrSlug, termSlug string, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->attributeTermBySlug"); err != nil {
 		return nil, err
@@ -267,7 +267,7 @@ func (e *ProductsEndpoint) AttributeTermBySlug(ctx context.Context, attrSlug, te
 
 // --- Brands ---
 
-// Brands returns product brands. Requires CoCart Basic.
+// Brands returns product brands. Requires CoCart Starter.
 func (e *ProductsEndpoint) Brands(ctx context.Context, params ...*PaginationParams) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->brands"); err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (e *ProductsEndpoint) Brands(ctx context.Context, params ...*PaginationPara
 	return e.doGet(ctx, "brands", p)
 }
 
-// Brand returns a single brand. Requires CoCart Basic.
+// Brand returns a single brand. Requires CoCart Starter.
 func (e *ProductsEndpoint) Brand(ctx context.Context, brandID int, params ...map[string]string) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->brand"); err != nil {
 		return nil, err
@@ -287,7 +287,7 @@ func (e *ProductsEndpoint) Brand(ctx context.Context, brandID int, params ...map
 	return e.doGet(ctx, fmt.Sprintf("brands/%d", brandID), params...)
 }
 
-// ByBrand returns products by brand. Requires CoCart Basic.
+// ByBrand returns products by brand. Requires CoCart Starter.
 func (e *ProductsEndpoint) ByBrand(ctx context.Context, brandSlug string, params ...*ProductListParams) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->byBrand"); err != nil {
 		return nil, err
@@ -321,7 +321,7 @@ func (e *ProductsEndpoint) ProductReviews(ctx context.Context, productID int, pa
 	return e.doGet(ctx, "reviews", p)
 }
 
-// MyReviews returns the authenticated user's product reviews. Requires CoCart Basic.
+// MyReviews returns the authenticated user's product reviews. Requires CoCart Starter.
 func (e *ProductsEndpoint) MyReviews(ctx context.Context, params ...*PaginationParams) (*Response, error) {
 	if err := e.client.RequiresBasic("products()->myReviews"); err != nil {
 		return nil, err

@@ -218,7 +218,7 @@ func (e *CartEndpoint) GetItemCount(ctx context.Context) (*Response, error) {
 }
 
 // Create creates a new guest cart session without adding items.
-// Requires CoCart Basic.
+// Requires CoCart Starter.
 func (e *CartEndpoint) Create(ctx context.Context) (*Response, error) {
 	if err := e.client.RequiresBasic("cart()->create"); err != nil {
 		return nil, err
