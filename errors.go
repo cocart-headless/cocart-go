@@ -137,7 +137,7 @@ func NewTwoFactorRequiredError(message string, data map[string]any) *TwoFactorRe
 	}
 }
 
-// VersionError represents a feature requiring CoCart Basic.
+// VersionError represents a feature requiring CoCart Starter.
 type VersionError struct {
 	CoCartError
 	Method string
@@ -148,11 +148,11 @@ func (e *VersionError) Unwrap() error {
 	return &e.CoCartError
 }
 
-// NewVersionError creates a new VersionError for a method that requires CoCart Basic.
+// NewVersionError creates a new VersionError for a method that requires CoCart Starter.
 func NewVersionError(method string) *VersionError {
 	return &VersionError{
 		CoCartError: CoCartError{
-			Message:   fmt.Sprintf("%s() requires CoCart Basic. Please upgrade from the legacy CoCart plugin.", method),
+			Message:   fmt.Sprintf("%s() requires CoCart Starter. Please upgrade from the CoCart Community plugin.", method),
 			HTTPCode:  0,
 			ErrorCode: "cocart_version_required",
 		},

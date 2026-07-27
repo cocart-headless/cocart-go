@@ -52,7 +52,7 @@ func TestVersionError(t *testing.T) {
 	if err.ErrorCode != "cocart_version_required" {
 		t.Errorf("ErrorCode = %s", err.ErrorCode)
 	}
-	expected := "cart()->create() requires CoCart Basic. Please upgrade from the legacy CoCart plugin."
+	expected := "cart()->create() requires CoCart Starter. Please upgrade from the CoCart Community plugin."
 	if err.Error() != expected {
 		t.Errorf("Error() = %s", err.Error())
 	}
