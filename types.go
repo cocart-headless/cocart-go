@@ -52,9 +52,11 @@ type CurrencyInfo struct {
 
 // CartItemQuantity describes quantity constraints for a cart item.
 type CartItemQuantity struct {
-	Value       int `json:"value"`
-	MinPurchase int `json:"min_purchase"`
-	MaxPurchase int `json:"max_purchase"`
+	Value      int  `json:"value"`
+	Minimum    int  `json:"minimum"`
+	Maximum    int  `json:"maximum"`
+	MultipleOf int  `json:"multiple_of"`
+	Editable   bool `json:"editable"`
 }
 
 // CartItemTotals contains price totals for a single cart item.
@@ -145,6 +147,16 @@ type CartCoupon struct {
 type CartFee struct {
 	Name string `json:"name"`
 	Fee  string `json:"fee"`
+}
+
+// CartTax represents a normalized cart tax line, as returned by
+// [Response.GetTaxes]. One entry per tax rate when the store's tax display
+// setting is itemized (Key is WooCommerce's composite rate code, e.g.
+// "US-US-1"), or a single synthetic entry keyed "total" when it isn't.
+type CartTax struct {
+	Key   string `json:"key"`
+	Name  string `json:"name"`
+	Price string `json:"price"`
 }
 
 // ShippingRate represents a shipping rate option.
@@ -359,6 +371,13 @@ type CartItemData struct {
 	Quantity  string            `json:"quantity"`
 	Variation map[string]string `json:"variation,omitempty"`
 	ItemData  map[string]any    `json:"item_data,omitempty"`
+}
+
+// BatchRequestItem represents a single sub-request queued for [Client.Batch].
+type BatchRequestItem struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Body   any    `json:"body,omitempty"`
 }
 
 // authCredentials holds basic auth credentials (internal).

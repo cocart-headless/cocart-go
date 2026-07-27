@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -45,11 +46,16 @@ type Client struct {
 	authHeaderName string
 	responseTransformer func(*Response) *Response
 	etagEnabled bool
-	etagCache   map[string]string
+	etagCache   map[string]etagCacheEntry
 	mainPlugin  MainPlugin
 	httpClient  *http.Client
 	lastResponse *Response
 	emitter     *eventEmitter
+
+	// inFlightGets de-duplicates concurrent identical GET requests (same
+	// built URL) so simultaneous callers share one network round trip.
+	inFlightGets map[string]*inFlightGet
+	inFlightMu   sync.Mutex
 
 	// Lazy-loaded endpoint instances
 	jwtManager       *JWTManager
@@ -61,6 +67,23 @@ type Client struct {
 	sessionsEndpoint *SessionsEndpoint
 
 	mu sync.RWMutex
+}
+
+// etagCacheEntry caches the ETag together with the body/headers of the fresh
+// (non-304) GET response that produced it, so a later 304 can be resolved
+// back to the actual cached data instead of an empty body.
+type etagCacheEntry struct {
+	etag    string
+	body    []byte
+	headers http.Header
+}
+
+// inFlightGet tracks a GET request in progress so concurrent identical GETs
+// can share its result instead of firing one request each.
+type inFlightGet struct {
+	done chan struct{}
+	resp *Response
+	err  error
 }
 
 // NewClient creates a new CoCart client.
@@ -75,9 +98,10 @@ func NewClient(storeURL string, opts ...Option) *Client {
 		storage:       NewMemoryStorage(),
 		authHeaderName: "Authorization",
 		etagEnabled:   true,
-		etagCache:     make(map[string]string),
+		etagCache:     make(map[string]etagCacheEntry),
 		mainPlugin:    MainPluginBasic,
 		emitter:       newEventEmitter(),
+		inFlightGets:  make(map[string]*inFlightGet),
 	}
 
 	for _, opt := range opts {
@@ -289,7 +313,7 @@ func (c *Client) SetETag(enabled bool) *Client {
 func (c *Client) ClearETagCache() *Client {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.etagCache = make(map[string]string)
+	c.etagCache = make(map[string]etagCacheEntry)
 	return c
 }
 
@@ -430,6 +454,42 @@ func (c *Client) TransferCartToCustomer(ctx context.Context, username, password 
 	return c.Cart().Get(ctx)
 }
 
+// Batch dispatches multiple sub-requests in a single call via `{namespace}/batch`
+// (requires CoCart Plus). Returns one merged, up-to-date cart response with
+// per-operation notices, instead of one response per request. See
+// [CartEndpoint.BatchUpdateItems] and [CartEndpoint.BatchRemoveItems] for
+// typed convenience wrappers over this.
+func (c *Client) Batch(ctx context.Context, requests []BatchRequestItem) (*Response, error) {
+	if len(requests) == 0 {
+		return nil, NewValidationError("Batch() requires at least one request.", 0, "cocart_batch_empty")
+	}
+
+	c.mu.RLock()
+	namespace := c.namespace
+	cartKey := c.cartKey
+	authenticated := c.auth != nil || c.jwtToken != ""
+	c.mu.RUnlock()
+
+	var params map[string]string
+	if cartKey != "" && !authenticated {
+		params = map[string]string{"cart_key": cartKey}
+	}
+
+	resp, err := c.RequestRaw(ctx, http.MethodPost, namespace+"/batch", params, map[string]any{"requests": requests})
+	if err != nil {
+		var cocartErr *CoCartError
+		if errors.As(err, &cocartErr) && cocartErr.ErrorCode == "rest_no_route" {
+			return resp, NewCoCartError(
+				"This method is only available with another CoCart plugin. Please ask support for assistance!",
+				404,
+				"cocart_plugin_required",
+			)
+		}
+		return resp, err
+	}
+	return resp, nil
+}
+
 // --- Endpoints (lazy-loaded) ---
 
 // Cart returns the cart endpoint.
@@ -473,6 +533,10 @@ func (c *Client) Sessions() *SessionsEndpoint {
 }
 
 // Account returns the account endpoint for customer profile, orders, downloads, and reviews.
+//
+// Note: the CoCart Account API is not yet available in a released version of
+// the CoCart plugin — this endpoint is implemented and ready for when it
+// ships.
 func (c *Client) Account() *AccountEndpoint {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -583,9 +647,42 @@ func (c *Client) request(ctx context.Context, method, endpoint string, params ma
 	return resp, nil
 }
 
-// executeRequest performs the actual HTTP request with retry logic.
+// executeRequest performs the actual HTTP request with retry logic,
+// de-duplicating concurrent identical GET requests.
 func (c *Client) executeRequest(ctx context.Context, method, endpoint string, params map[string]string, data any) (*Response, error) {
 	reqURL := c.buildURL(endpoint, params)
+
+	if method != http.MethodGet {
+		return c.performRequestWithRetry(ctx, method, reqURL, data)
+	}
+
+	// De-duplicate identical concurrent GETs (e.g. two goroutines requesting
+	// the same resource at once) so they share one network round trip
+	// instead of firing one each.
+	c.inFlightMu.Lock()
+	if call, ok := c.inFlightGets[reqURL]; ok {
+		c.inFlightMu.Unlock()
+		<-call.done
+		return call.resp, call.err
+	}
+	call := &inFlightGet{done: make(chan struct{})}
+	c.inFlightGets[reqURL] = call
+	c.inFlightMu.Unlock()
+
+	resp, err := c.performRequestWithRetry(ctx, method, reqURL, data)
+
+	call.resp, call.err = resp, err
+	close(call.done)
+
+	c.inFlightMu.Lock()
+	delete(c.inFlightGets, reqURL)
+	c.inFlightMu.Unlock()
+
+	return resp, err
+}
+
+// performRequestWithRetry performs the actual HTTP request with retry logic.
+func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL string, data any) (*Response, error) {
 	headers := c.buildHeaders()
 
 	var body []byte
@@ -600,8 +697,8 @@ func (c *Client) executeRequest(ctx context.Context, method, endpoint string, pa
 	// ETag: add If-None-Match for GET requests
 	c.mu.RLock()
 	if method == http.MethodGet && c.etagEnabled {
-		if cachedETag, ok := c.etagCache[reqURL]; ok {
-			headers["If-None-Match"] = cachedETag
+		if cached, ok := c.etagCache[reqURL]; ok {
+			headers["If-None-Match"] = cached.etag
 		}
 	}
 	maxRetries := c.maxRetries
@@ -646,18 +743,32 @@ func (c *Client) executeRequest(ctx context.Context, method, endpoint string, pa
 
 		duration := time.Since(start)
 
+		// A 304 has no body — substitute the body/headers cached alongside
+		// the ETag that produced the match, so callers still get the actual
+		// data instead of an empty response. Falls back to the live (empty)
+		// response if we have no cache entry for this URL.
+		if method == http.MethodGet && c.etagEnabled && resp.StatusCode == 304 {
+			c.mu.RLock()
+			cached, ok := c.etagCache[reqURL]
+			c.mu.RUnlock()
+			if ok {
+				resp.Body = cached.body
+				resp.Headers = cached.headers
+			}
+		}
+
 		c.mu.Lock()
 		c.lastResponse = resp
 		c.mu.Unlock()
 
 		c.extractCartKeyFromHeaders(resp)
 
-		// Cache ETag
-		if method == http.MethodGet {
+		// Cache the ETag + body from a fresh (non-304) GET response.
+		if method == http.MethodGet && resp.StatusCode != 304 {
 			c.mu.Lock()
 			if c.etagEnabled {
 				if etag := resp.GetETag(); etag != "" {
-					c.etagCache[reqURL] = etag
+					c.etagCache[reqURL] = etagCacheEntry{etag: etag, body: resp.Body, headers: resp.Headers}
 				}
 			}
 			c.mu.Unlock()
@@ -809,10 +920,14 @@ func (c *Client) buildHeaders() map[string]string {
 		headers[c.authHeaderName] = "Basic " + encoded
 	}
 
-	// Cart key header
+	// Cart key header: send only the header name the configured plugin
+	// variant actually reads.
 	if c.cartKey != "" && c.auth == nil && c.jwtToken == "" {
-		headers["Cart-Key"] = c.cartKey
-		headers["CoCart-API-Cart-Key"] = c.cartKey // Fallback for older plugin versions
+		cartKeyHeader := "Cart-Key"
+		if c.mainPlugin == MainPluginLegacy {
+			cartKeyHeader = "CoCart-API-Cart-Key"
+		}
+		headers[cartKeyHeader] = c.cartKey
 	}
 
 	// Custom headers (override defaults)
@@ -905,9 +1020,11 @@ func (c *Client) getRetryDelay(attempt int, resp *Response) time.Duration {
 			}
 		}
 	}
-	// Exponential backoff: 1s, 2s, 4s, ... max 30s
-	delay := math.Min(math.Pow(2, float64(attempt-1)), 30)
-	return time.Duration(delay) * time.Second
+	// Exponential backoff: 1s, 2s, 4s, ... max 30s, with ±20% jitter so many
+	// clients retrying at once don't re-collide on the same schedule.
+	base := math.Min(math.Pow(2, float64(attempt-1)), 30)
+	jitter := 0.8 + rand.Float64()*0.4
+	return time.Duration(base * jitter * float64(time.Second))
 }
 
 // logDebug logs a debug message.

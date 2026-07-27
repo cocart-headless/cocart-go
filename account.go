@@ -9,6 +9,10 @@ import (
 const accountBase = "cocart/v2/my-account"
 
 // AccountEndpoint handles all my-account API operations.
+//
+// Note: the CoCart Account API is not yet available in a released version of
+// the CoCart plugin — this endpoint is implemented and ready for when it
+// ships.
 type AccountEndpoint struct {
 	endpoint
 }

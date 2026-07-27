@@ -148,13 +148,14 @@ func main() {
 	fmt.Println("\nCustomer details updated")
 
 	// --- 11. Calculate shipping ---
+	//
+	// There is no address-taking shipping-calculation endpoint in the CoCart
+	// REST API (CalculateShipping is deprecated for this reason). Shipping
+	// was already recalculated as a side effect of UpdateCustomer() above,
+	// which set the destination address — Calculate() just recalculates
+	// totals against whatever address is already on the cart.
 
-	_, err = client.Cart().CalculateShipping(ctx, map[string]string{
-		"country":  "US",
-		"state":    "NY",
-		"postcode": "10001",
-		"city":     "New York",
-	})
+	_, err = client.Cart().Calculate(ctx)
 	if err != nil {
 		fmt.Println("Shipping calculation:", err)
 	}

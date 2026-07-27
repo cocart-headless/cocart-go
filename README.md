@@ -13,7 +13,7 @@ Official Go SDK for the [CoCart](https://cocartapi.com) REST API.
 * [ ] Add SDK docs to documentation site
 * [ ] Add support for Cart API extras
 * [ ] Add Checkout API support
-* [ ] Add Customers Account API support
+* [x] Add Customers Account API support — implemented (`client.Account()`); not yet available in a released version of the CoCart plugin, so this is ready for when it ships
 
 ---
 
@@ -43,6 +43,7 @@ See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Go versions, a
 - Retry with exponential backoff and `Retry-After` support
 - Paginated iteration using Go 1.23 range-over-func (`iter.Seq2`)
 - Legacy CoCart plugin support with version-aware endpoint guards
+- Batch requests (`client.Batch()`) — dispatch multiple sub-requests in a single round trip (requires CoCart Plus)
 
 ## Installation
 

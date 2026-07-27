@@ -249,6 +249,54 @@ func (r *Response) GetFees() []CartFee {
 	return fees
 }
 
+// GetTaxes returns cart tax lines from the response data, normalized to a
+// flat slice — returned as-is when the "taxes" field is already an array,
+// or converted when it's a legacy object keyed by tax rate code (e.g.
+// {"US-US-1": {"name": ..., "price": ...}}), which some CoCart plugin
+// versions return instead. Callers never need to branch on which shape the
+// server sent.
+func (r *Response) GetTaxes() []CartTax {
+	raw := r.Get("taxes")
+
+	switch v := raw.(type) {
+	case []any:
+		taxes := make([]CartTax, 0, len(v))
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			taxes = append(taxes, CartTax{
+				Key:   getStringField(m, "key"),
+				Name:  getStringField(m, "name"),
+				Price: getStringField(m, "price"),
+			})
+		}
+		return taxes
+	case map[string]any:
+		taxes := make([]CartTax, 0, len(v))
+		for key, tax := range v {
+			m, ok := tax.(map[string]any)
+			if !ok {
+				continue
+			}
+			taxes = append(taxes, CartTax{
+				Key:   key,
+				Name:  getStringField(m, "name"),
+				Price: getStringField(m, "price"),
+			})
+		}
+		return taxes
+	default:
+		return nil
+	}
+}
+
+// HasTaxes returns true if the cart has any tax lines.
+func (r *Response) HasTaxes() bool {
+	return len(r.GetTaxes()) > 0
+}
+
 // GetCrossSells returns cross-sell products from the response data.
 func (r *Response) GetCrossSells() []CrossSellProduct {
 	crossSells, _ := unmarshalField[[]CrossSellProduct](r, "cross_sells")
@@ -319,6 +367,15 @@ func (r *Response) GetErrorMessage() string {
 }
 
 // --- Internal helpers ---
+
+// getStringField reads a string value from a generic map, returning "" if
+// the key is missing or not a string.
+func getStringField(m map[string]any, key string) string {
+	if s, ok := m[key].(string); ok {
+		return s
+	}
+	return ""
+}
 
 func getDefault(defaultValue []any) any {
 	if len(defaultValue) > 0 {

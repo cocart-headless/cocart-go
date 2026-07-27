@@ -98,7 +98,7 @@ func TestResponseHas(t *testing.T) {
 
 func TestResponseCartHelpers(t *testing.T) {
 	body := `{
-		"items": [{"item_key":"abc","id":1,"name":"Widget","title":"Widget","price":"999","quantity":{"value":2,"min_purchase":1,"max_purchase":10},"totals":{"subtotal":"1998","subtotal_tax":"0","total":"1998","tax":"0"},"slug":"widget","meta":{"product_type":"simple","sku":"WDG-1","dimensions":{},"weight":0},"backorders":"no","cart_item_data":{},"featured_image":""}],
+		"items": [{"item_key":"abc","id":1,"name":"Widget","title":"Widget","price":"999","quantity":{"value":2,"minimum":1,"maximum":10,"multiple_of":1,"editable":true},"totals":{"subtotal":"1998","subtotal_tax":"0","total":"1998","tax":"0"},"slug":"widget","meta":{"product_type":"simple","sku":"WDG-1","dimensions":{},"weight":0},"backorders":"no","cart_item_data":{},"featured_image":""}],
 		"item_count": 2,
 		"coupons": [{"coupon":"SAVE10","label":"Save 10%","saving":"200","saving_html":"$2.00"}],
 		"totals": {"subtotal":"1998","total":"1798"},
@@ -127,6 +127,10 @@ func TestResponseCartHelpers(t *testing.T) {
 	}
 	if items[0].Name != "Widget" {
 		t.Errorf("item name = %s, want Widget", items[0].Name)
+	}
+	qty := items[0].Quantity
+	if qty.Minimum != 1 || qty.Maximum != 10 || qty.MultipleOf != 1 || !qty.Editable {
+		t.Errorf("item quantity = %+v, want {Value:2 Minimum:1 Maximum:10 MultipleOf:1 Editable:true}", qty)
 	}
 
 	totals := r.GetTotals()
@@ -205,6 +209,50 @@ func TestResponseErrorHelpers(t *testing.T) {
 	ok := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(`{"code":"ok"}`)}
 	if ok.GetErrorCode() != "" {
 		t.Errorf("GetErrorCode() on success = %s", ok.GetErrorCode())
+	}
+}
+
+func TestResponseGetTaxesArrayShape(t *testing.T) {
+	body := `{"taxes":[{"key":"US-US-1","name":"State Tax","price":"1.00"}]}`
+	r := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(body)}
+
+	taxes := r.GetTaxes()
+	if len(taxes) != 1 {
+		t.Fatalf("expected 1 tax line, got %d", len(taxes))
+	}
+	if taxes[0].Key != "US-US-1" || taxes[0].Name != "State Tax" || taxes[0].Price != "1.00" {
+		t.Errorf("unexpected tax line: %+v", taxes[0])
+	}
+	if !r.HasTaxes() {
+		t.Error("HasTaxes() should be true")
+	}
+}
+
+func TestResponseGetTaxesLegacyObjectShape(t *testing.T) {
+	body := `{"taxes":{"US-US-1":{"name":"State Tax","price":"1.00"}}}`
+	r := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(body)}
+
+	taxes := r.GetTaxes()
+	if len(taxes) != 1 {
+		t.Fatalf("expected 1 tax line, got %d", len(taxes))
+	}
+	if taxes[0].Key != "US-US-1" || taxes[0].Name != "State Tax" || taxes[0].Price != "1.00" {
+		t.Errorf("unexpected tax line: %+v", taxes[0])
+	}
+	if !r.HasTaxes() {
+		t.Error("HasTaxes() should be true")
+	}
+}
+
+func TestResponseGetTaxesEmpty(t *testing.T) {
+	r := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(`{"taxes":[]}`)}
+	if r.HasTaxes() {
+		t.Error("HasTaxes() should be false for empty taxes")
+	}
+
+	r2 := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(`{}`)}
+	if r2.HasTaxes() {
+		t.Error("HasTaxes() should be false when taxes is missing")
 	}
 }
 

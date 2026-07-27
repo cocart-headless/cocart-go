@@ -3,8 +3,11 @@ package cocart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -439,6 +442,214 @@ func TestFromRequest(t *testing.T) {
 	c2 := FromRequest("https://example.com", req2)
 	if c2.GetCartKey() != "" {
 		t.Errorf("expected empty cart key, got %s", c2.GetCartKey())
+	}
+}
+
+func TestClientCartKeyHeaderLegacyPlugin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cart-Key") != "" {
+			t.Errorf("legacy plugin should not send Cart-Key header, got %s", r.Header.Get("Cart-Key"))
+		}
+		if r.Header.Get("CoCart-API-Cart-Key") != "guest-key" {
+			t.Errorf("legacy plugin should send CoCart-API-Cart-Key, got %s", r.Header.Get("CoCart-API-Cart-Key"))
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, WithCartKey("guest-key"), WithMainPlugin(MainPluginLegacy))
+	_, err := c.Get(context.Background(), "cart")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClientCartKeyHeaderBasicPluginOnlySendsOneHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cart-Key") != "guest-key" {
+			t.Errorf("basic plugin should send Cart-Key, got %s", r.Header.Get("Cart-Key"))
+		}
+		if r.Header.Get("CoCart-API-Cart-Key") != "" {
+			t.Errorf("basic plugin should not send CoCart-API-Cart-Key, got %s", r.Header.Get("CoCart-API-Cart-Key"))
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, WithCartKey("guest-key"), WithMainPlugin(MainPluginBasic))
+	_, err := c.Get(context.Background(), "cart")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClientETagReturnsCachedBodyOn304(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			w.Header().Set("ETag", `"etag-123"`)
+			w.Header().Set("X-Custom", "fresh")
+			w.Write([]byte(`{"data": "fresh"}`))
+			return
+		}
+		if r.Header.Get("If-None-Match") == `"etag-123"` {
+			w.WriteHeader(304)
+			return
+		}
+		w.Write([]byte(`{"data": "should-not-see-this"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+
+	resp1, err := c.Get(context.Background(), "cart")
+	if err != nil {
+		t.Fatalf("first request error: %v", err)
+	}
+	if resp1.GetString("data", "") != "fresh" {
+		t.Fatalf("expected fresh body, got %s", resp1.ToJSON())
+	}
+
+	resp2, err := c.Get(context.Background(), "cart")
+	if err != nil {
+		t.Fatalf("second request error: %v", err)
+	}
+	if resp2.StatusCode != 304 {
+		t.Errorf("expected 304, got %d", resp2.StatusCode)
+	}
+	// The cached body/headers from the fresh 2xx GET must be returned instead
+	// of the empty 304 body.
+	if resp2.GetString("data", "") != "fresh" {
+		t.Errorf("expected cached body on 304, got %s", resp2.ToJSON())
+	}
+	if resp2.GetHeader("X-Custom") != "fresh" {
+		t.Errorf("expected cached headers on 304, got %s", resp2.GetHeader("X-Custom"))
+	}
+}
+
+func TestGetRetryDelayJitter(t *testing.T) {
+	c := NewClient("https://example.com")
+
+	// Base exponential delay for attempt 3 is min(2^2, 30) = 4s.
+	// ±20% jitter should keep the result within [3.2s, 4.8s].
+	for i := 0; i < 50; i++ {
+		delay := c.getRetryDelay(3, nil)
+		if delay < 3200*time.Millisecond || delay > 4800*time.Millisecond {
+			t.Fatalf("delay %v out of expected jitter range [3.2s, 4.8s]", delay)
+		}
+	}
+}
+
+func TestGetRetryDelayHonorsRetryAfterWithoutJitter(t *testing.T) {
+	c := NewClient("https://example.com")
+	headers := http.Header{}
+	headers.Set("Retry-After", "5")
+	resp := &Response{StatusCode: 429, Headers: headers}
+
+	delay := c.getRetryDelay(1, resp)
+	if delay != 5*time.Second {
+		t.Errorf("expected exact Retry-After delay of 5s, got %v", delay)
+	}
+}
+
+func TestClientInFlightGetDeduplication(t *testing.T) {
+	var callCount int32
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		<-release
+		w.Write([]byte(`{"item_count":1}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+
+	const concurrency = 5
+	var wg sync.WaitGroup
+	results := make([]*Response, concurrency)
+	errs := make([]error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = c.Get(context.Background(), "cart")
+		}(i)
+	}
+
+	// Give all goroutines a chance to register as in-flight before letting
+	// the (single) real request complete.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&callCount); got != 1 {
+		t.Errorf("expected exactly 1 network request for concurrent identical GETs, got %d", got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d unexpected error: %v", i, err)
+		}
+		if results[i].GetItemCount() != 1 {
+			t.Errorf("caller %d did not get the shared response", i)
+		}
+	}
+}
+
+func TestClientBatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !containsStr(r.URL.Path, "/cocart/batch") {
+			t.Errorf("expected /cocart/batch, got %s", r.URL.Path)
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		reqs, ok := body["requests"].([]any)
+		if !ok || len(reqs) != 1 {
+			t.Fatalf("expected 1 request in batch body, got %v", body["requests"])
+		}
+		w.Write([]byte(`{"item_count":3}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	resp, err := c.Batch(context.Background(), []BatchRequestItem{
+		{Method: "POST", Path: "/cocart/v2/cart/add-item", Body: map[string]any{"id": "1", "quantity": "1"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetItemCount() != 3 {
+		t.Errorf("expected item_count 3, got %d", resp.GetItemCount())
+	}
+}
+
+func TestClientBatchRequiresRequests(t *testing.T) {
+	c := NewClient("https://example.com")
+	_, err := c.Batch(context.Background(), nil)
+	if err == nil {
+		t.Error("expected validation error for empty requests")
+	}
+}
+
+func TestClientBatchNoRouteReturnsPluginRequired(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		w.Write([]byte(`{"code":"rest_no_route","message":"No route was found"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	_, err := c.Batch(context.Background(), []BatchRequestItem{{Method: "POST", Path: "/cocart/v2/cart/clear"}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cocartErr *CoCartError
+	if !errors.As(err, &cocartErr) {
+		t.Fatalf("expected *CoCartError, got %T", err)
+	}
+	if cocartErr.ErrorCode != "cocart_plugin_required" {
+		t.Errorf("expected cocart_plugin_required, got %s", cocartErr.ErrorCode)
 	}
 }
 
