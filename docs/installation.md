@@ -117,7 +117,7 @@ client3 := cocart.NewClient("https://your-store.com",
 
 ## Legacy Plugin Support
 
-The SDK supports both **CoCart Basic** and the **legacy CoCart plugin** (`cart-rest-api-for-woocommerce` v4.x). By default, the SDK targets CoCart Basic.
+The SDK supports both **CoCart Starter** and the **CoCart Community plugin** (`cart-rest-api-for-woocommerce` v4.x). By default, the SDK targets CoCart Starter.
 
 To use the SDK with the legacy plugin, set `mainPlugin` to `MainPluginLegacy`:
 
@@ -132,7 +132,7 @@ client.SetMainPlugin(cocart.MainPluginLegacy)
 
 ### What changes in legacy mode
 
-**Basic-only methods return an error immediately.** Methods that require CoCart Basic return a `*VersionError` before making any HTTP request, with a clear message indicating which method requires an upgrade:
+**Basic-only methods return an error immediately.** Methods that require CoCart Starter return a `*VersionError` before making any HTTP request, with a clear message indicating which method requires an upgrade:
 
 ```go
 client := cocart.NewClient("https://your-store.com",
@@ -143,7 +143,7 @@ _, err := client.Products().FindBySlug(ctx, "blue-hoodie")
 
 var vErr *cocart.VersionError
 if errors.As(err, &vErr) {
-	// "FindBySlug() requires CoCart Basic. Please upgrade..."
+	// "FindBySlug() requires CoCart Starter. Please upgrade..."
 	fmt.Println(vErr.Message)
 }
 ```

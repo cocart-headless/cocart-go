@@ -10,7 +10,7 @@ The SDK uses four error types organized in a hierarchy. `AuthenticationError`, `
 CoCartError (base)           — any API error
 ├── AuthenticationError      — login/permission problems (401, 403)
 ├── ValidationError          — bad input (400)
-└── VersionError             — method requires CoCart Basic (legacy mode)
+└── VersionError             — method requires CoCart Starter (legacy mode)
 ```
 
 ## Catching Errors
@@ -32,7 +32,7 @@ if err != nil {
 
 	switch {
 	case errors.As(err, &versionErr):
-		// Method requires CoCart Basic but SDK is configured for legacy plugin
+		// Method requires CoCart Starter but SDK is configured for legacy plugin
 		fmt.Println("Upgrade Required:", versionErr.Message)
 		fmt.Println("Error Code:", versionErr.ErrorCode) // "cocart_version_required"
 
@@ -71,7 +71,7 @@ All error types provide these fields:
 | `HTTPCode` | `int` | HTTP status code (400, 401, 403, 500, etc.) |
 | `ResponseData` | `map[string]any` | Full API response body for debugging |
 
-`VersionError` also has a `Method` field containing the method name that requires CoCart Basic.
+`VersionError` also has a `Method` field containing the method name that requires CoCart Starter.
 
 ## Inspecting the Full API Response
 
@@ -239,7 +239,7 @@ if errors.As(err, &cocartErr) {
 
 ### Legacy Plugin Version Guard
 
-When using the SDK with the legacy CoCart plugin (`MainPluginLegacy`), methods that require CoCart Basic return an error immediately:
+When using the SDK with the CoCart Community plugin (`MainPluginLegacy`), methods that require CoCart Starter return an error immediately:
 
 ```go
 client := cocart.NewClient("https://your-store.com",
@@ -250,7 +250,7 @@ _, err := client.Products().FindBySlug(ctx, "blue-hoodie")
 
 var vErr *cocart.VersionError
 if errors.As(err, &vErr) {
-	// vErr.Message   => "FindBySlug() requires CoCart Basic. Please upgrade..."
+	// vErr.Message   => "FindBySlug() requires CoCart Starter. Please upgrade..."
 	// vErr.ErrorCode => "cocart_version_required"
 	// vErr.HTTPCode  => 0 (no HTTP request was made)
 }

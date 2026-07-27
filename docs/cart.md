@@ -19,7 +19,7 @@ All cart methods take `context.Context` as their first parameter for cancellatio
 
 Create a new guest cart session without adding items. Only available for non-authenticated (guest) users.
 
-> Requires CoCart Basic. Returns `*VersionError` if using legacy plugin.
+> Requires CoCart Starter. Returns `*VersionError` if using legacy plugin.
 
 ```go
 response, err := client.Cart().Create(ctx)

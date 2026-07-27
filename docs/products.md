@@ -179,7 +179,7 @@ description := response.Get("description", "")
 
 ### By Slug
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ```go
 response, err := client.Products().FindBySlug(ctx, "blue-hoodie")
@@ -197,7 +197,7 @@ response, err := client.Products().Variations(ctx, 123, nil)
 
 ### Get a Specific Variation
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ```go
 response, err := client.Products().Variation(ctx, 123, 456)
@@ -214,7 +214,7 @@ response, err := client.Products().Categories(ctx, &cocart.PaginationParams{PerP
 
 ### Get a Single Category
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ```go
 response, err := client.Products().Category(ctx, 15)
@@ -230,7 +230,7 @@ response, err := client.Products().Tags(ctx, nil)
 
 ### Get a Single Tag
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ```go
 response, err := client.Products().Tag(ctx, 8)
@@ -268,7 +268,7 @@ response, err := client.Products().AttributeTerm(ctx, 1, 5)
 
 ### Slug-Based Attribute Lookups
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ```go
 // Get attribute by slug
@@ -283,7 +283,7 @@ response, err := client.Products().AttributeTermBySlug(ctx, "color", "red")
 
 ## Brands
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 ### List All Brands
 
@@ -327,7 +327,7 @@ response, err := client.Products().ProductReviews(ctx, 123, nil)
 
 ### My Reviews
 
-> Requires CoCart Basic.
+> Requires CoCart Starter.
 
 Get reviews written by the authenticated user:
 
