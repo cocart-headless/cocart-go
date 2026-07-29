@@ -27,7 +27,7 @@ func (e *CartEndpoint) GetFiltered(ctx context.Context, fields ...string) (*Resp
 }
 
 // AddItem adds an item to the cart.
-func (e *CartEndpoint) AddItem(ctx context.Context, productID int, quantity int, options ...map[string]any) (*Response, error) {
+func (e *CartEndpoint) AddItem(ctx context.Context, productID any, quantity int, options ...map[string]any) (*Response, error) {
 	if err := ValidateProductID(productID); err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (e *CartEndpoint) AddItem(ctx context.Context, productID int, quantity int,
 		return nil, err
 	}
 	data := map[string]any{
-		"id":       fmt.Sprintf("%d", productID),
+		"id":       fmt.Sprintf("%v", productID),
 		"quantity": fmt.Sprintf("%d", quantity),
 	}
 	if len(options) > 0 {
@@ -356,12 +356,13 @@ func (e *CartEndpoint) GetCrossSells(ctx context.Context) (*Response, error) {
 }
 
 // Add is a shorthand for adding a simple product to the cart.
-func (e *CartEndpoint) Add(ctx context.Context, productID int, quantity int) (*Response, error) {
+func (e *CartEndpoint) Add(ctx context.Context, productID any, quantity int) (*Response, error) {
 	return e.AddItem(ctx, productID, quantity)
 }
 
-// AddVariation adds a variable product to the cart.
-func (e *CartEndpoint) AddVariation(ctx context.Context, variationID int, quantity int, attributes map[string]string) (*Response, error) {
+// AddVariation adds a variable product to the cart. variationID accepts a
+// numeric variation ID or a SKU — see AddItem for why.
+func (e *CartEndpoint) AddVariation(ctx context.Context, variationID any, quantity int, attributes map[string]string) (*Response, error) {
 	opts := map[string]any{"variation": attributes}
 	return e.AddItem(ctx, variationID, quantity, opts)
 }

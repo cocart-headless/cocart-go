@@ -7,24 +7,32 @@ import (
 
 func TestValidateProductID(t *testing.T) {
 	tests := []struct {
-		id      int
+		id      any
 		wantErr bool
 	}{
 		{1, false},
 		{42, false},
 		{0, true},
 		{-1, true},
+		{"42", false},
+		{"abc", false},          // non-numeric string — treated as a potential SKU
+		{"BLUE-SHIRT-L", false}, // non-numeric string — treated as a potential SKU
+		{"123ABC", false},       // non-numeric string — treated as a potential SKU
+		{"", true},
+		{"0", true},
+		{"-1", true},
+		{"1.5", true},
 	}
 
 	for _, tt := range tests {
 		err := ValidateProductID(tt.id)
 		if (err != nil) != tt.wantErr {
-			t.Errorf("ValidateProductID(%d) err=%v, wantErr=%v", tt.id, err, tt.wantErr)
+			t.Errorf("ValidateProductID(%v) err=%v, wantErr=%v", tt.id, err, tt.wantErr)
 		}
 		if err != nil {
 			var valErr *ValidationError
 			if !errors.As(err, &valErr) {
-				t.Errorf("expected ValidationError for id=%d", tt.id)
+				t.Errorf("expected ValidationError for id=%v", tt.id)
 			}
 		}
 	}

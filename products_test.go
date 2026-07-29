@@ -51,6 +51,22 @@ func TestProductsFind(t *testing.T) {
 	}
 }
 
+func TestProductsFindAcceptsSku(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !containsStr(r.URL.Path, "/products/PCT-2024") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"id":42,"sku":"PCT-2024"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	_, err := c.Products().Find(context.Background(), "PCT-2024")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestProductsFindBySlugRequiresBasic(t *testing.T) {
 	c := NewClient("https://example.com", WithMainPlugin(MainPluginLegacy))
 	_, err := c.Products().FindBySlug(context.Background(), "widget")

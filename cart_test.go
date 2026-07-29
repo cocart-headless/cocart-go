@@ -71,6 +71,42 @@ func TestCartAddItemValidation(t *testing.T) {
 	}
 }
 
+func TestCartAddItemAcceptsSku(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["id"] != "BLUE-SHIRT-L" {
+			t.Errorf("expected id=BLUE-SHIRT-L, got %v", body["id"])
+		}
+		w.Write([]byte(`{"item_key":"abc123"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	_, err := c.Cart().AddItem(context.Background(), "BLUE-SHIRT-L", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCartAddVariationAcceptsSku(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["id"] != "VAR-SKU-1" {
+			t.Errorf("expected id=VAR-SKU-1, got %v", body["id"])
+		}
+		w.Write([]byte(`{"item_key":"abc123"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	_, err := c.Cart().AddVariation(context.Background(), "VAR-SKU-1", 1, map[string]string{"attribute_pa_color": "blue"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCartClear(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

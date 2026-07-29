@@ -77,6 +77,9 @@ response, err := client.Cart().AddItem(ctx, 123, 2)
 
 // Shorthand alias
 response, err := client.Cart().Add(ctx, 123, 2)
+
+// A SKU also works — the server resolves it to a product ID
+response, err := client.Cart().AddItem(ctx, "BLUE-SHIRT-L", 1)
 ```
 
 ### Add with Options

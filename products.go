@@ -19,13 +19,13 @@ func (e *ProductsEndpoint) All(ctx context.Context, params ...*ProductListParams
 	return e.doGet(ctx, "", p)
 }
 
-// Find returns a single product by ID.
-func (e *ProductsEndpoint) Find(ctx context.Context, productID int, params ...ProductParams) (*Response, error) {
+// Find returns a single product by ID or SKU.
+func (e *ProductsEndpoint) Find(ctx context.Context, productID any, params ...ProductParams) (*Response, error) {
 	var p map[string]string
 	if len(params) > 0 {
 		p = structToParams(params[0])
 	}
-	return e.doGet(ctx, fmt.Sprintf("%d", productID), p)
+	return e.doGet(ctx, fmt.Sprintf("%v", productID), p)
 }
 
 // FindBySlug returns a single product by slug. Requires CoCart Starter.
