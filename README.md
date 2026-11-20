@@ -3,7 +3,7 @@
 Official Go SDK for the [CoCart](https://cocartapi.com) REST API.
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/cocart-headless/cocart-go/tests.yml?label=tests&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-go/actions/workflows/tests.yml)
-[![License](https://img.shields.io/github/license/jayanratna/resend-php?color=9cf&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-go/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/cocart-headless/cocart-go?color=9cf&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-go/blob/main/LICENSE)
 
 > [!IMPORTANT]
 > This SDK is still in development and not yet ready for production use. Provide feedback if you experience a bug.
@@ -12,8 +12,8 @@ Official Go SDK for the [CoCart](https://cocartapi.com) REST API.
 
 * [ ] Add SDK docs to documentation site
 * [ ] Add support for Cart API extras
-* [ ] Add Checkout API support
-* [x] Add Customers Account API support — implemented (`client.Account()`); not yet available in a released version of the CoCart plugin, so this is ready for when it ships
+* [x] Add Checkout API support — implemented ([`client.Checkout()`](docs/checkout.md)); needs CoCart Plus 2.0, which isn't released yet
+* [x] Add Customers Account API support — implemented ([`client.Account()`](docs/account.md)); needs CoCart Plus 2.0, which isn't released yet
 
 ---
 
@@ -21,6 +21,7 @@ Official Go SDK for the [CoCart](https://cocartapi.com) REST API.
 
 - **Go 1.23+** — Required for `iter.Seq2` (range-over-func) support used by the paginator.
 - **CoCart plugin** installed on your WooCommerce store — This is the WordPress plugin that provides the REST API endpoints the SDK communicates with.
+- **CoCart Plus 2.0** for the account and checkout APIs (not released yet) — The add-on plugin that provides customer accounts, checkout and payment. The cart and product APIs don't need it.
 - [CoCart JWT Authentication](https://wordpress.org/plugins/cocart-jwt-authentication/) plugin for JWT features (optional) — Only needed if you want to use JSON Web Token authentication (explained in the [Authentication](docs/authentication.md) guide).
 
 ## Support Policy
@@ -136,8 +137,8 @@ A lost answer, or `409 cocart_payment_in_progress`, is a `*CheckoutOutcomeUnknow
 | [Cart API](docs/cart.md) | Add, update, remove items, coupons, shipping, fees |
 | [Products API](docs/products.md) | List, filter, search, categories, tags, brands |
 | [Store API](docs/store.md) | Store info, typed deserialization, field filtering |
-| [Account API](docs/account.md) | Registration, customer profile, password, address, orders, downloads, reviews and subscriptions (ready for when the CoCart plugin ships it) |
-| [Checkout API](docs/checkout.md) | Place orders and take payment, reading the result, 3D Secure, off-site steps, saved payment methods, the thank-you page, paying for unpaid orders, finding how a lost checkout ended (CoCart Plus 2.0) |
+| [Account API](docs/account.md) | Registration, customer profile, password, address, orders, downloads, reviews and subscriptions (needs CoCart Plus 2.0, not released yet) |
+| [Checkout API](docs/checkout.md) | Place orders and take payment, reading the result, 3D Secure, off-site steps, saved payment methods, the thank-you page, paying for unpaid orders, finding how a lost checkout ended (needs CoCart Plus 2.0, not released yet) |
 | [Sessions API](docs/sessions.md) | Admin sessions, SessionManager, storage adapters |
 | [Error Handling](docs/error-handling.md) | Error hierarchy, catching errors, common scenarios, expired carts, rate limits |
 | [Extension Data](docs/extension-data.md) | Plugin data under `extensions` (CoCart Plus integrations), and sending a plan, gift or warranty choice |
