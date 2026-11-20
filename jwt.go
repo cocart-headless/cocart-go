@@ -37,21 +37,21 @@ func WithRefreshTokenStorageKey(key string) JWTOption {
 // JWTManager handles JWT token lifecycle: acquisition, refresh, validation,
 // and optional persistence using a storage adapter.
 type JWTManager struct {
-	client              *Client
-	storage             Storage
-	tokenStorageKey     string
+	client                 *Client
+	storage                Storage
+	tokenStorageKey        string
 	refreshTokenStorageKey string
-	autoRefresh         bool
-	isRefreshing        bool
-	mu                  sync.Mutex
+	autoRefresh            bool
+	isRefreshing           bool
+	mu                     sync.Mutex
 }
 
 // NewJWTManager creates a new JWTManager.
 func NewJWTManager(client *Client, storage Storage, opts ...JWTOption) *JWTManager {
 	j := &JWTManager{
-		client:              client,
-		storage:             storage,
-		tokenStorageKey:     "cocart_jwt_token",
+		client:                 client,
+		storage:                storage,
+		tokenStorageKey:        "cocart_jwt_token",
 		refreshTokenStorageKey: "cocart_jwt_refresh_token",
 	}
 	for _, opt := range opts {

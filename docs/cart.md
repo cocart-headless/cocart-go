@@ -95,6 +95,8 @@ response, err := client.Cart().AddItem(ctx, 123, 1, map[string]any{
 })
 ```
 
+With CoCart Plus, the options also carry a subscription plan (`"convert_to_sub"`), a gift recipient (`"recipient_email"`) or a warranty (`"item_data": {"warranty": ...}`), and `ChangePlan(ctx, itemKey, value)` switches a cart item's plan. See [Extension Data](extension-data.md#sending-the-customers-choices).
+
 ### Add a Variable Product
 
 A **variable product** is a product with options like size or color. In WooCommerce, these are called "variations." When adding a variable product, you specify which variation the customer chose:
@@ -210,12 +212,40 @@ response, err := client.Batch(ctx, []cocart.BatchRequestItem{
 
 `BatchUpdateItems` and `BatchRemoveItems` (shown above) are typed convenience wrappers over `client.Batch()` for the common case of updating/removing several items at once.
 
+The cart returned is the one from the last sub-request that succeeded, with every sub-request's notices merged. A sub-request that failed shows up as an `error` notice, so read the notices to see what didn't apply:
+
+```go
+failed := response.GetNotices()["error"] // e.g. [`Coupon "SAVE1O" does not exist!`]
+```
+
+If every sub-request fails, or the batch mixes in other routes, the response is WordPress's standard batch list (`responses`, one per sub-request, with its own `status`).
+
 ## Cart Management
 
 ### Clear Cart
 
 ```go
 response, err := client.Cart().Clear(ctx)
+```
+
+### Remove All Items, Keep the Rest
+
+> Requires the CoCart Plus plugin.
+
+Removes every item but keeps the cart's coupons, fees and customer details (`DELETE /cart/items`):
+
+```go
+response, err := client.Cart().RemoveAllItems(ctx)
+```
+
+### Mini Cart
+
+> Requires the CoCart Plus plugin.
+
+A lighter cart response for a header or drawer:
+
+```go
+response, err := client.Cart().GetMini(ctx)
 ```
 
 ### Calculate Totals
@@ -236,11 +266,14 @@ response, err := client.Cart().Update(ctx, map[string]any{
 
 ### Get Totals
 
-```go
-// Raw values
-response, err := client.Cart().GetTotals(ctx, false)
+> `GetTotals` is a separate request to its own totals endpoint, not part of a regular cart fetch. It returns the full breakdown WooCommerce calculates, including `cart_contents_total` and the taxes per tax rate (`shipping_taxes`, `cart_contents_taxes`, `fee_taxes`).
 
-// Formatted with currency (HTML)
+```go
+// Minor-unit strings, like the cart: {"total": "125500", ...}
+response, err := client.Cart().GetTotals(ctx, false)
+totals, err := cocart.Unmarshal[cocart.CartTotalsBreakdown](response)
+
+// Formatted with the currency: {"total": "$1,255.00", ...}
 response, err := client.Cart().GetTotals(ctx, true)
 ```
 
@@ -272,12 +305,18 @@ response, err := client.Cart().GetItem(ctx, "abc123def456...")
 
 ```go
 response, err := client.Cart().ApplyCoupon(ctx, "SUMMER20")
+
+// A coupon restricted to certain emails, before the cart knows the customer's
+response, err := client.Cart().ApplyCoupon(ctx, "VIP10", "jane@example.com")
 ```
 
 ### Remove a Coupon
 
 ```go
 response, err := client.Cart().RemoveCoupon(ctx, "SUMMER20")
+
+// Remove every coupon
+response, err := client.Cart().RemoveCoupons(ctx)
 ```
 
 ### Get Applied Coupons
@@ -290,6 +329,9 @@ response, err := client.Cart().GetCoupons(ctx)
 
 ```go
 response, err := client.Cart().CheckCoupons(ctx)
+
+// Including email restrictions
+response, err := client.Cart().CheckCoupons(ctx, "jane@example.com")
 ```
 
 ## Customer Details
@@ -350,6 +392,17 @@ response, err := client.Cart().GetCustomer(ctx)
 
 ```go
 response, err := client.Cart().GetShippingMethods(ctx)
+
+// CoCart keys the packages by package ID under `shipping.packages`;
+// GetShippingMethods() on the response lists them, each with its rates.
+for _, pkg := range response.GetShippingMethods() {
+	for rateID, rate := range pkg.Rates {
+		fmt.Printf("%s: %s (%s)\n", rateID, rate.Label, rate.Cost) // cost in minor units, e.g. "500"
+	}
+}
+
+// The whole field: TotalPackages, HasCalculatedShipping, Packages
+shipping := response.GetShipping()
 ```
 
 ### Set Shipping Method
@@ -381,6 +434,9 @@ response, err := client.Cart().Calculate(ctx)
 
 ```go
 response, err := client.Cart().GetFees(ctx)
+
+// The cart keys fees by fee ID; GetFees() lists them: [{Name: "Gift wrap", Fee: "500"}]
+fees := response.GetFees()
 ```
 
 ### Add a Fee
@@ -391,6 +447,9 @@ response, err := client.Cart().AddFee(ctx, "Rush Processing", 9.99, false)
 
 // Taxable fee
 response, err := client.Cart().AddFee(ctx, "Gift Wrapping", 4.99, true)
+
+// Taxable, with a tax class
+response, err := client.Cart().AddFee(ctx, "Gift Wrapping", 4.99, true, "reduced-rate")
 ```
 
 ### Remove All Fees
@@ -411,7 +470,7 @@ response, err := client.Cart().GetCrossSells(ctx)
 
 **ETag** (Entity Tag) is a caching mechanism. When the server responds, it includes an `ETag` header — a unique fingerprint of the data. On the next request, the SDK automatically sends this fingerprint back via `If-None-Match`. If the data hasn't changed, the server responds with `304 Not Modified` (no body), saving bandwidth.
 
-ETag support is **enabled by default**.
+ETag support is **enabled by default**. A response whose `Cache-Control` says `no-store` or `private` (CoCart Plus sends that for checkout, orders and the account) is never kept in the ETag cache.
 
 ```go
 // First request: full response with ETag header
@@ -464,8 +523,15 @@ cartKey := response.GetCartKey()
 // Cart hash
 hash := response.GetCartHash()
 
-// Notices
+// Notices, keyed by type: {"success": [...], "error": [...]}, or an empty map
 notices := response.GetNotices()
+
+// Shipping packages as a list, and fees as a list (the cart keys both by ID)
+packages := response.GetShippingMethods()
+fees := response.GetFees()
+
+// Data plugins add to the cart, e.g. subscription recurring_totals (see extension-data.md)
+extensions := response.GetExtensions()
 
 // Tax lines — normalized to a flat slice regardless of whether the
 // plugin/version returns "taxes" as an array or a legacy object keyed
@@ -484,6 +550,11 @@ if response.Has("totals.discount_total") {
 
 // Full data
 data := response.ToJSON()
+
+// The whole cart as a typed struct
+cart, err := cocart.Unmarshal[cocart.CartResponse](response)
 ```
+
+The typed structs follow what CoCart sends: amounts are minor-unit strings, the customer's address fields are prefixed (`cart.Customer.BillingAddress.Email` reads `billing_email`), and maps such as `Fees`, `Notices` and `Extensions` are `ObjectMap` values, which accept both the `{}` CoCart Starter 5 sends for an empty map and the `[]` CoCart 4.x sent.
 
 See [Error Handling](error-handling.md) for handling API errors.

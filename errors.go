@@ -1,6 +1,7 @@
 package cocart
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -18,6 +19,61 @@ type CoCartError struct {
 
 func (e *CoCartError) Error() string {
 	return e.Message
+}
+
+// GetCart returns the cart sent with the error, when CoCart sends one:
+// cocart_item_not_in_cart (an item key that isn't in the cart) carries the
+// cart as it is now, so you can show it without another request. It returns
+// nil otherwise.
+func (e *CoCartError) GetCart() *CartResponse {
+	data, _ := e.ResponseData["data"].(map[string]any)
+	cart, ok := data["cart"].(map[string]any)
+	if !ok || len(cart) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(cart)
+	if err != nil {
+		return nil
+	}
+	var result CartResponse
+	if err := json.Unmarshal(b, &result); err != nil {
+		return nil
+	}
+	return &result
+}
+
+// Fields returns every field at fault, by path (e.g. "billing.postcode"),
+// with its message: CoCart Plus checks a whole form at once (data.fields).
+// It returns an empty map when the error isn't about fields.
+func (e *CoCartError) Fields() map[string]string {
+	out := map[string]string{}
+	fields, _ := e.data()["fields"].(map[string]any)
+	for path, message := range fields {
+		if s, ok := message.(string); ok {
+			out[path] = s
+		}
+	}
+	return out
+}
+
+// Field returns the first field at fault, as a path such as
+// "billing.postcode" (data.field), or "" when there is none.
+func (e *CoCartError) Field() string {
+	field, _ := e.data()["field"].(string)
+	return field
+}
+
+// Reason returns the underlying plugin's own reason (data.reason), or ""
+// when there is none.
+func (e *CoCartError) Reason() string {
+	reason, _ := e.data()["reason"].(string)
+	return reason
+}
+
+// data returns the error's data object, or nil.
+func (e *CoCartError) data() map[string]any {
+	data, _ := e.ResponseData["data"].(map[string]any)
+	return data
 }
 
 // NewCoCartError creates a new CoCartError.

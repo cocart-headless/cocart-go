@@ -136,6 +136,10 @@ type Storage interface {
 }
 ```
 
+`NewClient` reads the cart key from its storage when it's created (unless `WithCartKey` gives one), so a client with a storage that outlives the process, such as Redis or a file, continues the same cart on its own. The client saves every cart key the store sends there, including a replacement for an expired cart. `RestoreSession()` is only needed after swapping the storage with `SetStorage()`.
+
+> **A storage holds one cart key.** On a server handling many customers, don't share one storage (or one storage key) between them, or a customer's client would pick up another customer's cart. Give each customer their own storage key with `WithStorageKey`, or take the cart key from the request: `FromRequest` reads it from the `X-Cart-Key` header and never from storage.
+
 ### MemoryStorage
 
 Stores data in memory using a Go `map` protected by `sync.RWMutex`. This is the default. Data is lost when the process restarts. Best for short-lived operations, servers that handle sessions per-request, or testing.

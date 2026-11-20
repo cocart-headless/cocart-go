@@ -38,6 +38,8 @@ client := cocart.NewClient("https://your-store.com",
 )
 ```
 
+A client created with `WithStorage` reads the cart key its storage kept from an earlier run. See [Storage Adapters](sessions.md#storage-adapters).
+
 ## Basic Auth
 
 **Basic Authentication** is the simplest way to authenticate. It sends the username and password encoded in a header with every request. It should only be used over HTTPS (which encrypts the connection) to keep credentials safe.

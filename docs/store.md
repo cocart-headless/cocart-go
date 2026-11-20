@@ -14,9 +14,9 @@ if err != nil {
 	log.Fatal(err)
 }
 
-fmt.Println(response.Get("store_name", ""))
-fmt.Println(response.Get("store_description", ""))
-fmt.Println(response.Get("store_url", ""))
+fmt.Println(response.Get("title", ""))
+fmt.Println(response.Get("description", ""))
+fmt.Println(response.Get("home_url", ""))
 ```
 
 ## Typed Deserialization
@@ -34,9 +34,10 @@ if err != nil {
 	log.Fatal(err)
 }
 
-fmt.Println("Store:", info.StoreName)
-fmt.Println("URL:", info.StoreURL)
-fmt.Println("Description:", info.StoreDescription)
+fmt.Println("Store:", info.Title)
+fmt.Println("URL:", info.HomeURL)
+fmt.Println("Description:", info.Description)
+fmt.Println("CoCart:", info.Versions["core"], info.Versions["plus"])
 ```
 
 ## Field Filtering
@@ -45,7 +46,7 @@ Request only specific fields to reduce response size:
 
 ```go
 response, err := client.Store().Info(ctx, map[string]string{
-	"_fields": "store_name,store_url",
+	"_fields": "title,home_url",
 })
 ```
 
@@ -55,7 +56,12 @@ The `StoreInfo` struct contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `StoreName` | `string` | The store's display name |
-| `StoreDescription` | `string` | The store's tagline or description |
-| `StoreURL` | `string` | The store's public URL |
-| `Routes` | `map[string]any` | Available API routes and their details |
+| `Title` | `string` | The store's display name |
+| `Description` | `string` | The store's tagline or description |
+| `HomeURL` | `string` | The store's public URL |
+| `Language` | `string` | The store's language, e.g. `en-US` |
+| `GMTOffset` | `string` | The store's offset from GMT, in hours |
+| `TimezoneString` | `string` | The store's timezone |
+| `StoreAddress` | `ObjectMap[string]` | `address`, `address_2`, `city`, `country`, `postcode` |
+| `Routes` | `ObjectMap[any]` | Available API routes, keyed by name |
+| `Versions` | `ObjectMap[string]` | The CoCart versions: `core`, and `plus` with CoCart Plus |

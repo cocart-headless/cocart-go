@@ -16,7 +16,25 @@ response, err := client.Products().All(ctx, &cocart.ProductListParams{
 	PerPage: 20,
 	Page:    1,
 })
+
+// The list is under `products`, with the page count alongside
+list, err := cocart.Unmarshal[cocart.ProductsResponse](response)
+for _, product := range list.Products {
+	fmt.Println(product.Name, product.Prices.Price) // price in minor units, e.g. "1800"
+}
+fmt.Println("Pages:", list.TotalPages)
 ```
+
+Product responses carry a lot for headless pages (related products, embedded variations with price and stock, upsells, cross-sells, stock, extension meta). For a listing that needs less, ask for just those fields; CoCart then skips building the rest:
+
+```go
+response, err := client.Products().All(ctx, &cocart.ProductListParams{
+	PerPage: 20,
+	Fields:  "id,name,slug,prices,images,add_to_cart",
+})
+```
+
+Prices are minor-unit strings under `prices` (`"1800"` for 18.00; see `CurrencyFormatter` in [Utilities](utilities.md)), an image's `Src` maps size names to URLs (`thumbnail`, `medium`, `full`…), and `Attributes` is keyed by attribute (`attribute_pa_color`).
 
 ## Parameters Reference
 
@@ -34,7 +52,7 @@ All list methods accept an optional `*ProductListParams` struct with these field
 | `MinPrice` | `string` | Minimum price |
 | `MaxPrice` | `string` | Maximum price |
 | `StockStatus` | `StockStatus` | Stock status (`StockInStock`, `StockOutOfStock`, `StockOnBackorder`) |
-| `OrderBy` | `ProductOrderBy` | Sort field (`OrderByDate`, `OrderByID`, `OrderByTitle`, `OrderBySlug`, `OrderByPrice`, `OrderByPopularity`, `OrderByRating`) |
+| `OrderBy` | `ProductOrderBy` | Sort order: `OrderByDate`, `OrderByID`, `OrderByMenuOrder`, `OrderByInclude`, `OrderByTitle`, `OrderBySlug`, `OrderByName`, `OrderByAlphabetical`, `OrderByReverseAlpha`, `OrderByPopularity`, `OrderBySales`, `OrderByRating`, `OrderByReviewCount`, `OrderByStock`, `OrderByOnSaleFirst`, `OrderByFeaturedFirst`, `OrderByPriceAsc`, `OrderByPriceDesc`; `OrderByRelevance` and `OrderByRand` need CoCart Starter |
 | `Order` | `SortOrder` | Sort direction (`SortAsc`, `SortDesc`) |
 
 ## Filtering
@@ -47,7 +65,7 @@ response, err := client.Products().ByCategory(ctx, "electronics", nil)
 // With additional parameters
 response, err := client.Products().ByCategory(ctx, "electronics", &cocart.ProductListParams{
 	PerPage: 20,
-	OrderBy: cocart.OrderByPrice,
+	OrderBy: cocart.OrderByPriceAsc,
 	Order:   cocart.SortAsc,
 })
 ```
@@ -134,11 +152,11 @@ response, err := client.Products().Paginate(ctx, 2, 12, nil)
 ### Sort Helper
 
 ```go
-// Cheapest first
-response, err := client.Products().SortBy(ctx, cocart.OrderByPrice, cocart.SortAsc)
+// Cheapest first (CoCart rejects plain "price": use OrderByPriceAsc or OrderByPriceDesc)
+response, err := client.Products().SortBy(ctx, cocart.OrderByPriceAsc, cocart.SortAsc)
 
 // Most expensive first
-response, err := client.Products().SortBy(ctx, cocart.OrderByPrice, cocart.SortDesc)
+response, err := client.Products().SortBy(ctx, cocart.OrderByPriceDesc, cocart.SortDesc)
 
 // Newest first
 response, err := client.Products().SortBy(ctx, cocart.OrderByDate, cocart.SortDesc)
@@ -178,8 +196,12 @@ response, err := client.Products().Find(ctx, 123)
 response, err := client.Products().Find(ctx, "PCT-2024")
 
 name := response.Get("name", "")
-price := response.Get("price", "")
+price := response.Get("prices.price", "") // minor units, e.g. "1800"
 description := response.Get("description", "")
+
+// Or as a typed struct
+product, err := cocart.Unmarshal[cocart.Product](response)
+fmt.Println(product.Prices.Price, product.Images[0].Src["thumbnail"])
 ```
 
 ### By Slug
@@ -198,6 +220,7 @@ response, err := client.Products().FindBySlug(ctx, "blue-hoodie")
 
 ```go
 response, err := client.Products().Variations(ctx, 123, nil)
+variations, err := cocart.Unmarshal[[]cocart.ProductVariation](response)
 ```
 
 ### Get a Specific Variation
@@ -311,7 +334,7 @@ response, err := client.Products().ByBrand(ctx, "nike", nil)
 // With additional parameters
 response, err := client.Products().ByBrand(ctx, "nike", &cocart.ProductListParams{
 	PerPage: 20,
-	OrderBy: cocart.OrderByPrice,
+	OrderBy: cocart.OrderByPriceAsc,
 	Order:   cocart.SortAsc,
 })
 ```
@@ -330,6 +353,18 @@ response, err := client.Products().Reviews(ctx, nil)
 response, err := client.Products().ProductReviews(ctx, 123, nil)
 ```
 
+### Post a Review
+
+```go
+response, err := client.Products().CreateReview(ctx, cocart.ProductReviewInput{
+	ProductID:     123,
+	Review:        "Warm and well made.",
+	Rating:        5,
+	Reviewer:      "Jane", // guests
+	ReviewerEmail: "jane@example.com",
+})
+```
+
 ### My Reviews
 
 > Requires CoCart Starter.
@@ -339,6 +374,29 @@ Get reviews written by the authenticated user:
 ```go
 response, err := client.Products().MyReviews(ctx, nil)
 ```
+
+## Shipping Rates for a Product
+
+> Requires the CoCart Plus plugin.
+
+Shipping rates for a product before it's added to the cart, priced for the store's (or the customer's) location. Pass a variation ID, or the parent with the variation's attributes:
+
+```go
+response, err := client.Products().ShippingRates(ctx, 154, cocart.ProductShippingRatesParams{Quantity: 2})
+response, err := client.Products().ShippingRates(ctx, 134, cocart.ProductShippingRatesParams{
+	Variation: map[string]string{"attribute_pa_color": "blue", "attribute_logo": "Yes"},
+})
+
+packages, _ := response.Get("packages").(map[string]any)
+for _, pkg := range packages {
+	rates, _ := pkg.(map[string]any)["rates"].(map[string]any)
+	for id, rate := range rates {
+		fmt.Println(id, rate.(map[string]any)["cost"]) // cost in minor units
+	}
+}
+```
+
+The request is sent without the cart key: the route prices a simulated cart and refuses one with `400 cocart_calculate_product_shipping_rates_cart_access_denied`. External and grouped products can't be priced (also a `400`).
 
 ## SEO (CoCart SEO Pack)
 
@@ -371,13 +429,13 @@ response, err := client.Products().All(ctx, &cocart.ProductListParams{PerPage: 5
 
 // Check success
 if response.IsSuccessful() {
-	fmt.Println("Products:", string(response.Body))
+	fmt.Println("Products:", response.Get("total_products", 0))
 }
 
 // Access nested data with dot notation
 response, err := client.Products().Find(ctx, 123)
 fmt.Println(response.Get("name", ""))
-fmt.Println(response.Get("price", ""))
+fmt.Println(response.Get("prices.price", ""))
 fmt.Println(response.Get("categories.0.name", ""))
 
 // Pagination helpers

@@ -88,7 +88,9 @@ func WithStorageKey(key string) Option {
 	}
 }
 
-// WithMaxRetries sets the maximum number of retries for transient failures.
+// WithMaxRetries sets the maximum number of retries for transient failures:
+// a 429 for any request, a 503 or timeout for a GET only, so an order is
+// never placed twice.
 func WithMaxRetries(n int) Option {
 	return func(c *Client) {
 		if n < 0 {
@@ -126,7 +128,7 @@ func WithETag(enabled bool) Option {
 	}
 }
 
-// WithMainPlugin sets the CoCart main plugin variant ("basic" or "legacy").
+// WithMainPlugin sets the CoCart main plugin variant ("starter" or "legacy").
 func WithMainPlugin(plugin MainPlugin) Option {
 	return func(c *Client) {
 		c.mainPlugin = plugin

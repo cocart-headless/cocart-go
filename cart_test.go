@@ -127,8 +127,15 @@ func TestCartApplyCoupon(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		if body["coupon"] != "SAVE10" {
-			t.Errorf("expected coupon=SAVE10, got %v", body["coupon"])
+		// CoCart Plus requires `code`; `coupon` is rejected as a missing parameter.
+		if body["code"] != "SAVE10" {
+			t.Errorf("expected code=SAVE10, got %v", body["code"])
+		}
+		if _, ok := body["coupon"]; ok {
+			t.Error("coupon should not be sent")
+		}
+		if _, ok := body["email"]; ok {
+			t.Error("email should not be sent without one")
 		}
 		w.Write([]byte(`{"coupons":[{"coupon":"SAVE10"}]}`))
 	}))
@@ -180,7 +187,7 @@ func TestCartAddItemsRequiresItems(t *testing.T) {
 	}
 }
 
-func TestCartCreateRequiresBasic(t *testing.T) {
+func TestCartCreateRequiresStarter(t *testing.T) {
 	c := NewClient("https://example.com", WithMainPlugin(MainPluginLegacy))
 	_, err := c.Cart().Create(context.Background())
 	if err == nil {

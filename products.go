@@ -3,6 +3,9 @@ package cocart
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // ProductsEndpoint handles all product-related API operations.
@@ -30,7 +33,7 @@ func (e *ProductsEndpoint) Find(ctx context.Context, productID any, params ...Pr
 
 // FindBySlug returns a single product by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) FindBySlug(ctx context.Context, slug string, params ...ProductParams) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->findBySlug"); err != nil {
+	if err := e.client.RequiresStarter("products()->findBySlug"); err != nil {
 		return nil, err
 	}
 	var p map[string]string
@@ -106,7 +109,9 @@ func (e *ProductsEndpoint) ByPriceRange(ctx context.Context, minPrice, maxPrice 
 	return e.All(ctx, &plp)
 }
 
-// SortBy returns products sorted by a field.
+// SortBy returns products sorted by a field: one of the ProductOrderBy
+// constants. Sort by price with OrderByPriceAsc or OrderByPriceDesc; CoCart
+// rejects "price".
 func (e *ProductsEndpoint) SortBy(ctx context.Context, field ProductOrderBy, order SortOrder, params ...*ProductListParams) (*Response, error) {
 	var plp ProductListParams
 	if len(params) > 0 && params[0] != nil {
@@ -163,7 +168,7 @@ func (e *ProductsEndpoint) Variations(ctx context.Context, productID int, params
 
 // Variation returns a specific variation. Requires CoCart Starter.
 func (e *ProductsEndpoint) Variation(ctx context.Context, productID, variationID int, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->variation"); err != nil {
+	if err := e.client.RequiresStarter("products()->variation"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, fmt.Sprintf("%d/variations/%d", productID, variationID), params...)
@@ -182,7 +187,7 @@ func (e *ProductsEndpoint) Categories(ctx context.Context, params ...*Pagination
 
 // Category returns a single category. Requires CoCart Starter.
 func (e *ProductsEndpoint) Category(ctx context.Context, categoryID int, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->category"); err != nil {
+	if err := e.client.RequiresStarter("products()->category"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, fmt.Sprintf("categories/%d", categoryID), params...)
@@ -201,7 +206,7 @@ func (e *ProductsEndpoint) Tags(ctx context.Context, params ...*PaginationParams
 
 // Tag returns a single tag. Requires CoCart Starter.
 func (e *ProductsEndpoint) Tag(ctx context.Context, tagID int, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->tag"); err != nil {
+	if err := e.client.RequiresStarter("products()->tag"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, fmt.Sprintf("tags/%d", tagID), params...)
@@ -239,7 +244,7 @@ func (e *ProductsEndpoint) AttributeTerm(ctx context.Context, attributeID, termI
 
 // AttributeBySlug returns an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeBySlug(ctx context.Context, slug string, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->attributeBySlug"); err != nil {
+	if err := e.client.RequiresStarter("products()->attributeBySlug"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, "attributes/"+slug, params...)
@@ -247,7 +252,7 @@ func (e *ProductsEndpoint) AttributeBySlug(ctx context.Context, slug string, par
 
 // AttributeTermsBySlug returns terms for an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeTermsBySlug(ctx context.Context, slug string, params ...*PaginationParams) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->attributeTermsBySlug"); err != nil {
+	if err := e.client.RequiresStarter("products()->attributeTermsBySlug"); err != nil {
 		return nil, err
 	}
 	var p map[string]string
@@ -259,7 +264,7 @@ func (e *ProductsEndpoint) AttributeTermsBySlug(ctx context.Context, slug string
 
 // AttributeTermBySlug returns a term by slug for an attribute by slug. Requires CoCart Starter.
 func (e *ProductsEndpoint) AttributeTermBySlug(ctx context.Context, attrSlug, termSlug string, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->attributeTermBySlug"); err != nil {
+	if err := e.client.RequiresStarter("products()->attributeTermBySlug"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, "attributes/"+attrSlug+"/terms/"+termSlug, params...)
@@ -269,7 +274,7 @@ func (e *ProductsEndpoint) AttributeTermBySlug(ctx context.Context, attrSlug, te
 
 // Brands returns product brands. Requires CoCart Starter.
 func (e *ProductsEndpoint) Brands(ctx context.Context, params ...*PaginationParams) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->brands"); err != nil {
+	if err := e.client.RequiresStarter("products()->brands"); err != nil {
 		return nil, err
 	}
 	var p map[string]string
@@ -281,7 +286,7 @@ func (e *ProductsEndpoint) Brands(ctx context.Context, params ...*PaginationPara
 
 // Brand returns a single brand. Requires CoCart Starter.
 func (e *ProductsEndpoint) Brand(ctx context.Context, brandID int, params ...map[string]string) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->brand"); err != nil {
+	if err := e.client.RequiresStarter("products()->brand"); err != nil {
 		return nil, err
 	}
 	return e.doGet(ctx, fmt.Sprintf("brands/%d", brandID), params...)
@@ -289,7 +294,7 @@ func (e *ProductsEndpoint) Brand(ctx context.Context, brandID int, params ...map
 
 // ByBrand returns products by brand. Requires CoCart Starter.
 func (e *ProductsEndpoint) ByBrand(ctx context.Context, brandSlug string, params ...*ProductListParams) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->byBrand"); err != nil {
+	if err := e.client.RequiresStarter("products()->byBrand"); err != nil {
 		return nil, err
 	}
 	var plp ProductListParams
@@ -321,9 +326,14 @@ func (e *ProductsEndpoint) ProductReviews(ctx context.Context, productID int, pa
 	return e.doGet(ctx, "reviews", p)
 }
 
+// CreateReview posts a product review.
+func (e *ProductsEndpoint) CreateReview(ctx context.Context, review ProductReviewInput) (*Response, error) {
+	return e.doPost(ctx, "reviews", review)
+}
+
 // MyReviews returns the authenticated user's product reviews. Requires CoCart Starter.
 func (e *ProductsEndpoint) MyReviews(ctx context.Context, params ...*PaginationParams) (*Response, error) {
-	if err := e.client.RequiresBasic("products()->myReviews"); err != nil {
+	if err := e.client.RequiresStarter("products()->myReviews"); err != nil {
 		return nil, err
 	}
 	var p map[string]string
@@ -331,6 +341,36 @@ func (e *ProductsEndpoint) MyReviews(ctx context.Context, params ...*PaginationP
 		p = structToParams(params[0])
 	}
 	return e.doGet(ctx, "reviews/mine", p)
+}
+
+// --- Shipping rates ---
+
+// ShippingRates returns the shipping rates for a product before it's added to
+// the cart (CoCart Plus). productID may be a variation ID or a SKU.
+//
+// The request is sent without the cart key: the route prices a simulated cart
+// and refuses one (400 cocart_calculate_product_shipping_rates_cart_access_denied).
+// External and grouped products can't be priced (400).
+func (e *ProductsEndpoint) ShippingRates(ctx context.Context, productID any, params ...ProductShippingRatesParams) (*Response, error) {
+	query := make(map[string]string)
+	if len(params) > 0 {
+		p := params[0]
+		if p.Quantity > 0 {
+			query["quantity"] = strconv.Itoa(p.Quantity)
+		}
+		for k, v := range p.Variation {
+			query["variation["+k+"]"] = v
+		}
+		for k, v := range p.ItemData {
+			query["item_data["+k+"]"] = v
+		}
+	}
+	route := fmt.Sprintf("%s/%s/products/%s/shipping-rates", e.client.GetNamespace(), APIVersion, url.PathEscape(fmt.Sprintf("%v", productID)))
+	resp, err := e.client.requestRaw(ctx, http.MethodGet, route, query, nil, true)
+	if err != nil {
+		return resp, e.handleNoRoute(err)
+	}
+	return resp, nil
 }
 
 // --- SEO ---

@@ -81,7 +81,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Product name:", product.Get("name", ""))
-	fmt.Println("Product price:", product.Get("price", ""))
+	fmt.Println("Product price:", product.Get("prices.price", "")) // minor units, e.g. "1800"
 
 	// --- Pagination with range-over-func (Go 1.23+) ---
 

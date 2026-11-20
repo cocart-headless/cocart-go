@@ -69,7 +69,7 @@ docs/                   # documentation
 
 - **Exported identifiers:** `PascalCase` (`Client`, `NewClient`, `AddItem`)
 - **Unexported identifiers:** `camelCase` (`buildHeaders`, `extractCartKey`)
-- **Constants:** `PascalCase` (`Version`, `APIVersion`, `MainPluginBasic`)
+- **Constants:** `PascalCase` (`Version`, `APIVersion`, `MainPluginStarter`)
 - **Config pattern:** functional options (`WithTimeout(30*time.Second)`)
 - Tests are colocated with source (`cart.go` / `cart_test.go`)
 - Use `httptest` for HTTP mocking in tests — no real network calls

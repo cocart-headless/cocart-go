@@ -40,7 +40,7 @@ See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Go versions, a
 - Configurable auth header name (for proxies that strip `Authorization`)
 - JWT authentication with auto-refresh
 - ETag conditional requests for reduced bandwidth
-- Retry with exponential backoff and `Retry-After` support
+- Retry with exponential backoff, waiting as long as `RateLimit-Retry-After` (or `Retry-After`) says
 - Paginated iteration using Go 1.23 range-over-func (`iter.Seq2`)
 - Legacy CoCart plugin support with version-aware endpoint guards
 - Batch requests (`client.Batch()`) — dispatch multiple sub-requests in a single round trip (requires CoCart Plus)
@@ -98,6 +98,35 @@ func main() {
 }
 ```
 
+## Checkout (CoCart Plus 2.0)
+
+On a server, create **one client per customer**: a client holds one customer's cart key or login.
+
+```go
+client := cocart.NewClient("https://your-store.com", cocart.WithCartKey(cartKey))
+
+// The review page: Get snapshots the total the customer sees. Don't call it just before placing.
+checkout, err := client.Checkout().Get(ctx)
+
+// payment_data carries gateway tokens only, e.g. a Stripe payment method ID from Stripe.js.
+result, err := client.Checkout().PlaceOrder(ctx, map[string]any{
+	"billing_address": billing,
+	"payment_method":  "stripe",
+	"payment_data":    map[string]any{"wc-stripe-payment-method": paymentMethodID},
+})
+
+switch {
+case result.IsComplete(): // order_placed: show the thank-you page with result.OrderID and result.OrderKey
+case result.IsAwaitingPayment(): // placed; the customer pays with the gateway's SDK
+case result.NeedsConfirmation(): // 3D Secure in the page with result.ClientSecret, then the same call again
+case result.NeedsRedirect(): // send the customer to result.RedirectURL, then ConfirmReturn()
+case result.IsPending(): // the gateway hasn't confirmed yet: confirm again shortly
+default: // result.IsFailed(): show result.Message (plain text), pay again with PayForOrder()
+}
+```
+
+A lost answer, or `409 cocart_payment_in_progress`, is a `*CheckoutOutcomeUnknownError`: `Checkout().GetStatus(ctx, err.CheckoutID)` says `order_placed`, `payment_required`, `in_progress` or `not_placed`. See [Checkout](docs/checkout.md).
+
 ## Documentation
 
 | Guide | Description |
@@ -107,8 +136,11 @@ func main() {
 | [Cart API](docs/cart.md) | Add, update, remove items, coupons, shipping, fees |
 | [Products API](docs/products.md) | List, filter, search, categories, tags, brands |
 | [Store API](docs/store.md) | Store info, typed deserialization, field filtering |
+| [Account API](docs/account.md) | Registration, customer profile, password, address, orders, downloads, reviews and subscriptions (ready for when the CoCart plugin ships it) |
+| [Checkout API](docs/checkout.md) | Place orders and take payment, reading the result, 3D Secure, off-site steps, saved payment methods, the thank-you page, paying for unpaid orders, finding how a lost checkout ended (CoCart Plus 2.0) |
 | [Sessions API](docs/sessions.md) | Admin sessions, SessionManager, storage adapters |
-| [Error Handling](docs/error-handling.md) | Error hierarchy, catching errors, common scenarios |
+| [Error Handling](docs/error-handling.md) | Error hierarchy, catching errors, common scenarios, expired carts, rate limits |
+| [Extension Data](docs/extension-data.md) | Plugin data under `extensions` (CoCart Plus integrations), and sending a plan, gift or warranty choice |
 | [Utilities](docs/utilities.md) | Currency formatter, timezone helper, response transformer |
 
 ## Configuration Options
@@ -124,14 +156,14 @@ func main() {
 | `WithRESTPrefix(prefix)` | WordPress REST API prefix | `"wp-json"` |
 | `WithNamespace(ns)` | API namespace (white-labelling) | `"cocart"` |
 | `WithHeaders(map)` | Custom headers for every request | — |
-| `WithStorage(s)` | Storage adapter for cart keys/tokens | `MemoryStorage` |
+| `WithStorage(s)` | Storage adapter for cart keys/tokens; the client reads the cart key back when it's created | `MemoryStorage` |
 | `WithStorageKey(key)` | Storage key name for cart key | `"cocart_cart_key"` |
-| `WithMaxRetries(n)` | Max retries for transient failures | `0` |
-| `WithDebug(bool)` | Enable debug logging | `false` |
+| `WithMaxRetries(n)` | Max retries for transient failures (429s; 503s and timeouts for GETs only) | `0` |
+| `WithDebug(bool)` | Log each request, response, error and retry, with every query value hidden (`***`) | `false` |
 | `WithAuthHeaderName(name)` | Custom auth header name | `"Authorization"` |
 | `WithResponseTransformer(fn)` | Transform every response | — |
 | `WithETag(bool)` | Enable ETag conditional requests | `true` |
-| `WithMainPlugin(plugin)` | CoCart plugin variant | `MainPluginBasic` |
+| `WithMainPlugin(plugin)` | CoCart plugin variant | `MainPluginStarter` |
 | `WithHTTPClient(hc)` | Custom `*http.Client` | — |
 
 ## Examples

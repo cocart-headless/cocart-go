@@ -107,7 +107,7 @@ func TestResponseCartHelpers(t *testing.T) {
 		"fees": [],
 		"shipping": [],
 		"cross_sells": [],
-		"notices": ["test notice"]
+		"notices": {"success": ["Widget added"]}
 	}`
 	r := &Response{StatusCode: 200, Headers: http.Header{}, Body: []byte(body)}
 
@@ -152,8 +152,8 @@ func TestResponseCartHelpers(t *testing.T) {
 	}
 
 	notices := r.GetNotices()
-	if len(notices) != 1 {
-		t.Errorf("notices len = %d, want 1", len(notices))
+	if len(notices["success"]) != 1 || notices["success"][0] != "Widget added" {
+		t.Errorf("notices = %v, want success: [Widget added]", notices)
 	}
 }
 

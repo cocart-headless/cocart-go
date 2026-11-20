@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,29 +29,29 @@ const (
 
 // Client is the main CoCart API client.
 type Client struct {
-	storeURL    string
-	restPrefix  string
-	namespace   string
-	storageKey  string
-	cartKey     string
-	auth        *authCredentials
-	jwtToken    string
-	refreshToken string
-	consumerKey    string
-	consumerSecret string
-	maxRetries  int
-	timeout     time.Duration
-	customHeaders map[string]string
-	storage     Storage
-	debug       bool
-	authHeaderName string
+	storeURL            string
+	restPrefix          string
+	namespace           string
+	storageKey          string
+	cartKey             string
+	auth                *authCredentials
+	jwtToken            string
+	refreshToken        string
+	consumerKey         string
+	consumerSecret      string
+	maxRetries          int
+	timeout             time.Duration
+	customHeaders       map[string]string
+	storage             Storage
+	debug               bool
+	authHeaderName      string
 	responseTransformer func(*Response) *Response
-	etagEnabled bool
-	etagCache   map[string]etagCacheEntry
-	mainPlugin  MainPlugin
-	httpClient  *http.Client
-	lastResponse *Response
-	emitter     *eventEmitter
+	etagEnabled         bool
+	etagCache           map[string]etagCacheEntry
+	mainPlugin          MainPlugin
+	httpClient          *http.Client
+	lastResponse        *Response
+	emitter             *eventEmitter
 
 	// inFlightGets de-duplicates concurrent identical GET requests (same
 	// built URL) so simultaneous callers share one network round trip.
@@ -87,29 +88,48 @@ type inFlightGet struct {
 }
 
 // NewClient creates a new CoCart client.
+//
+// Unless [WithCartKey] gives one, the client reads the cart key its storage
+// adapter kept from an earlier run (see [WithStorage]), so the same cart
+// continues on its own. A storage holds one cart key: don't share one between
+// customers.
 func NewClient(storeURL string, opts ...Option) *Client {
-	c := &Client{
-		storeURL:      strings.TrimRight(storeURL, "/"),
-		restPrefix:    "wp-json",
-		namespace:     "cocart",
-		storageKey:    "cocart_cart_key",
-		timeout:       30 * time.Second,
-		customHeaders: make(map[string]string),
-		storage:       NewMemoryStorage(),
-		authHeaderName: "Authorization",
-		etagEnabled:   true,
-		etagCache:     make(map[string]etagCacheEntry),
-		mainPlugin:    MainPluginBasic,
-		emitter:       newEventEmitter(),
-		inFlightGets:  make(map[string]*inFlightGet),
+	c := newClient(storeURL, opts...)
+	if c.cartKey == "" {
+		// Storage unavailable: start without a cart key.
+		_ = c.RestoreSession()
 	}
+	return c
+}
+
+func newClient(storeURL string, opts ...Option) *Client {
+	c := &Client{
+		storeURL:       strings.TrimRight(storeURL, "/"),
+		restPrefix:     "wp-json",
+		namespace:      "cocart",
+		storageKey:     "cocart_cart_key",
+		timeout:        30 * time.Second,
+		customHeaders:  make(map[string]string),
+		storage:        NewMemoryStorage(),
+		authHeaderName: "Authorization",
+		etagEnabled:    true,
+		etagCache:      make(map[string]etagCacheEntry),
+		mainPlugin:     MainPluginStarter,
+		emitter:        newEventEmitter(),
+		inFlightGets:   make(map[string]*inFlightGet),
+	}
+
+	c.emitter.logger = c.logEvent
 
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	c.httpClient = &http.Client{
-		Timeout: c.timeout,
+	// Keep a client passed with WithHTTPClient.
+	if c.httpClient == nil {
+		c.httpClient = &http.Client{
+			Timeout: c.timeout,
+		}
 	}
 
 	return c
@@ -118,8 +138,11 @@ func NewClient(storeURL string, opts ...Option) *Client {
 // FromRequest creates a new Client from an incoming HTTP request,
 // extracting the cart key from the X-Cart-Key header if present.
 // This is useful for building Go middleware that proxies CoCart requests.
+//
+// The cart key comes from the request only: unlike [NewClient], it doesn't
+// read the storage adapter, which a server may share between customers.
 func FromRequest(storeURL string, r *http.Request, opts ...Option) *Client {
-	c := NewClient(storeURL, opts...)
+	c := newClient(storeURL, opts...)
 	if cartKey := r.Header.Get("X-Cart-Key"); cartKey != "" {
 		c.SetCartKey(cartKey)
 	}
@@ -221,7 +244,8 @@ func (c *Client) SetTimeout(d time.Duration) *Client {
 	return c
 }
 
-// SetMaxRetries sets the maximum retry count for transient failures.
+// SetMaxRetries sets the maximum retry count for transient failures: a 429
+// for any request, a 503 or timeout for a GET only.
 func (c *Client) SetMaxRetries(n int) *Client {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -352,8 +376,8 @@ func (c *Client) GetLastResponse() *Response {
 	return c.lastResponse
 }
 
-// RequiresBasic throws a VersionError if the SDK is configured for the legacy plugin.
-func (c *Client) RequiresBasic(method string) error {
+// RequiresStarter throws a VersionError if the SDK is configured for the legacy plugin.
+func (c *Client) RequiresStarter(method string) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.mainPlugin == MainPluginLegacy {
@@ -414,6 +438,13 @@ func (c *Client) ClearSession() error {
 	c.auth = nil
 	c.jwtToken = ""
 	c.refreshToken = ""
+	c.mu.Unlock()
+	return c.forgetCartKey()
+}
+
+// forgetCartKey clears the cart key, in storage too.
+func (c *Client) forgetCartKey() error {
+	c.mu.Lock()
 	c.cartKey = ""
 	storage := c.storage
 	storageKey := c.storageKey
@@ -421,7 +452,9 @@ func (c *Client) ClearSession() error {
 	return storage.Delete(storageKey)
 }
 
-// RestoreSession restores the cart key from storage.
+// RestoreSession restores the cart key from storage. [NewClient] already
+// does this, so you only need it after swapping the storage with
+// [Client.SetStorage].
 func (c *Client) RestoreSession() error {
 	c.mu.RLock()
 	storage := c.storage
@@ -586,6 +619,16 @@ func (c *Client) Delete(ctx context.Context, endpoint string, params ...map[stri
 
 // RequestRaw makes an HTTP request using a full REST route (no namespace/version prefix).
 func (c *Client) RequestRaw(ctx context.Context, method, route string, params map[string]string, data any) (*Response, error) {
+	return c.requestRaw(ctx, method, route, params, data, false)
+}
+
+// requestRaw is RequestRaw, optionally without the cart key for routes that
+// refuse one (products/{id}/shipping-rates).
+//
+// It emits the same events as the other requests, so debug output and
+// listeners see the CoCart Plus routes too. It's never sent again: a raw
+// request can take payment.
+func (c *Client) requestRaw(ctx context.Context, method, route string, params map[string]string, data any, omitCartKey bool) (*Response, error) {
 	c.mu.RLock()
 	rawURL := fmt.Sprintf("%s/%s/%s", c.storeURL, c.restPrefix, strings.TrimLeft(route, "/"))
 	c.mu.RUnlock()
@@ -594,7 +637,7 @@ func (c *Client) RequestRaw(ctx context.Context, method, route string, params ma
 		rawURL += "?" + encodeParams(params)
 	}
 
-	headers := c.buildHeaders()
+	headers := c.buildHeaders(!omitCartKey)
 	var body []byte
 	if data != nil {
 		var err error
@@ -604,8 +647,12 @@ func (c *Client) RequestRaw(ctx context.Context, method, route string, params ma
 		}
 	}
 
+	c.emitter.emitRequest(RequestEvent{Method: method, URL: rawURL, Headers: headers, Body: string(body)})
+	start := time.Now()
+
 	resp, err := c.doHTTP(ctx, method, rawURL, headers, body)
 	if err != nil {
+		c.emitter.emitError(ErrorEvent{Method: method, URL: rawURL, Err: err})
 		return nil, err
 	}
 
@@ -615,15 +662,43 @@ func (c *Client) RequestRaw(ctx context.Context, method, route string, params ma
 
 	c.extractCartKeyFromHeaders(resp)
 
+	c.emitter.emitResponse(ResponseEvent{Method: method, URL: rawURL, Status: resp.StatusCode, Duration: time.Since(start), Response: resp})
+
 	if resp.StatusCode >= 400 {
-		return resp, c.handleErrorResponse(resp, method, rawURL)
+		apiErr := c.handleErrorResponse(resp, method, rawURL)
+		c.emitter.emitError(ErrorEvent{Method: method, URL: rawURL, Err: apiErr})
+		return resp, apiErr
 	}
 
 	return c.applyTransformer(resp), nil
 }
 
-// request is the main request method with JWT auto-refresh support.
+// request is the main request method.
+//
+// If a guest's cart no longer exists (CoCart Starter 5 refuses the cart key
+// with cocart_invalid_cart, for example after the cart expired), the stored
+// cart key is forgotten and the request retried once as a new guest.
 func (c *Client) request(ctx context.Context, method, endpoint string, params map[string]string, data any) (*Response, error) {
+	resp, err := c.requestWithAuthRefresh(ctx, method, endpoint, params, data)
+	if err == nil {
+		return resp, nil
+	}
+
+	// The stored guest cart no longer exists (e.g. it expired). CoCart refuses
+	// the request before running it, so forget the key and retry once as a
+	// new guest.
+	var cocartErr *CoCartError
+	if !errors.As(err, &cocartErr) || cocartErr.ErrorCode != "cocart_invalid_cart" || c.GetCartKey() == "" || c.IsAuthenticated() {
+		return resp, err
+	}
+	_ = c.forgetCartKey()
+	return c.requestWithAuthRefresh(ctx, method, endpoint, params, data)
+}
+
+// requestWithAuthRefresh makes the request; if a JWTManager with auto-refresh
+// is attached and the request fails with an authentication error, the token
+// is refreshed and the request retried once.
+func (c *Client) requestWithAuthRefresh(ctx context.Context, method, endpoint string, params map[string]string, data any) (*Response, error) {
 	resp, err := c.executeRequest(ctx, method, endpoint, params, data)
 	if err != nil {
 		var authErr *AuthenticationError
@@ -683,7 +758,7 @@ func (c *Client) executeRequest(ctx context.Context, method, endpoint string, pa
 
 // performRequestWithRetry performs the actual HTTP request with retry logic.
 func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL string, data any) (*Response, error) {
-	headers := c.buildHeaders()
+	headers := c.buildHeaders(true)
 
 	var body []byte
 	if data != nil {
@@ -717,7 +792,10 @@ func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL str
 	for {
 		resp, err := c.doHTTP(ctx, method, reqURL, headers, body)
 		if err != nil {
-			if attempt < maxRetries && isTransientError(err) {
+			// Only a GET is sent again: a request that changes something may
+			// have run before the connection dropped, and running it twice
+			// could, for example, charge a card twice.
+			if attempt < maxRetries && method == http.MethodGet && isTransientError(err) {
 				attempt++
 				delay := c.getRetryDelay(attempt, nil)
 				c.emitter.emitRetry(RetryEvent{
@@ -763,8 +841,10 @@ func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL str
 
 		c.extractCartKeyFromHeaders(resp)
 
-		// Cache the ETag + body from a fresh (non-304) GET response.
-		if method == http.MethodGet && resp.StatusCode != 304 {
+		// Cache the ETag + body from a fresh (non-304) GET response, unless
+		// the store says it mustn't be kept (checkout, orders and the account
+		// are "no-store, private").
+		if method == http.MethodGet && resp.StatusCode != 304 && mayStore(resp.GetHeader("Cache-Control")) {
 			c.mu.Lock()
 			if c.etagEnabled {
 				if etag := resp.GetETag(); etag != "" {
@@ -774,8 +854,8 @@ func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL str
 			c.mu.Unlock()
 		}
 
-		// Retry on transient HTTP status codes
-		if attempt < maxRetries && isRetryableStatus(resp.StatusCode) {
+		// Retry on transient HTTP status codes (429, and 503 for a GET)
+		if attempt < maxRetries && isRetryableStatus(method, resp.StatusCode) {
 			attempt++
 			delay := c.getRetryDelay(attempt, resp)
 			c.emitter.emitRetry(RetryEvent{
@@ -798,6 +878,7 @@ func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL str
 				URL:      reqURL,
 				Status:   resp.StatusCode,
 				Duration: duration,
+				Response: resp,
 			})
 			return resp, c.handleErrorResponse(resp, method, reqURL)
 		}
@@ -807,6 +888,7 @@ func (c *Client) performRequestWithRetry(ctx context.Context, method, reqURL str
 			URL:      reqURL,
 			Status:   resp.StatusCode,
 			Duration: duration,
+			Response: resp,
 		})
 
 		return c.applyTransformer(resp), nil
@@ -822,7 +904,8 @@ func (c *Client) doHTTP(ctx context.Context, method, rawURL string, headers map[
 
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("cocart: failed to create request: %w", err)
+		// Not wrapped: the error names the full URL, query string (cart key) included.
+		return nil, NewCoCartError("cocart: failed to create request: "+safeErrorMessage(err.Error()), 0, "network_error")
 	}
 
 	for k, v := range headers {
@@ -842,7 +925,9 @@ func (c *Client) doHTTP(ctx context.Context, method, rawURL string, headers map[
 				"request_timeout",
 			)
 		}
-		return nil, err
+		// Not wrapped: net/http's *url.Error names the full URL, query string
+		// (cart key) included.
+		return nil, NewCoCartError(safeErrorMessage(err.Error()), 0, "network_error")
 	}
 	defer httpResp.Body.Close()
 
@@ -898,8 +983,9 @@ func (c *Client) buildURL(endpoint string, params map[string]string) string {
 	return rawURL
 }
 
-// buildHeaders constructs the request headers.
-func (c *Client) buildHeaders() map[string]string {
+// buildHeaders constructs the request headers, with the cart key header
+// unless includeCartKey is false.
+func (c *Client) buildHeaders(includeCartKey bool) map[string]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -922,7 +1008,7 @@ func (c *Client) buildHeaders() map[string]string {
 
 	// Cart key header: send only the header name the configured plugin
 	// variant actually reads.
-	if c.cartKey != "" && c.auth == nil && c.jwtToken == "" {
+	if includeCartKey && c.cartKey != "" && c.auth == nil && c.jwtToken == "" {
 		cartKeyHeader := "Cart-Key"
 		if c.mainPlugin == MainPluginLegacy {
 			cartKeyHeader = "CoCart-API-Cart-Key"
@@ -966,9 +1052,13 @@ func (c *Client) handleErrorResponse(resp *Response, method, reqURL string) erro
 		apiMessage = "An unknown error occurred"
 	}
 
+	// "POST /cocart/v2/cart/add-item: Product not found [cocart_product_not_found]".
+	// Route only: the full URL's query string can carry the cart key and
+	// consumer key/secret, which must never end up in a message an app logs
+	// or displays.
 	context := ""
 	if method != "" && reqURL != "" {
-		context = fmt.Sprintf("%s %s: ", method, reqURL)
+		context = fmt.Sprintf("%s %s: ", method, routePath(reqURL))
 	}
 	codeLabel := ""
 	if code != "unknown_error" {
@@ -986,6 +1076,13 @@ func (c *Client) handleErrorResponse(resp *Response, method, reqURL string) erro
 	// Authentication errors
 	if httpCode == 401 || httpCode == 403 || strings.Contains(code, "authenticat") {
 		return NewAuthenticationError(message, httpCode, code, data)
+	}
+
+	// A refused state (409), a rate limit (429) or the server's fault (5xx)
+	// is never a validation error, whatever its code says (e.g.
+	// cocart_order_invalid_status is a 409).
+	if httpCode == 409 || httpCode == 429 || httpCode >= 500 {
+		return NewCoCartError(message, httpCode, code, data)
 	}
 
 	// Validation errors
@@ -1010,7 +1107,11 @@ func (c *Client) applyTransformer(resp *Response) *Response {
 // getRetryDelay calculates the retry delay.
 func (c *Client) getRetryDelay(attempt int, resp *Response) time.Duration {
 	if resp != nil {
-		retryAfter := resp.GetHeader("Retry-After")
+		// CoCart Plus sends RateLimit-Retry-After; a proxy may send Retry-After.
+		retryAfter := resp.GetHeader("RateLimit-Retry-After")
+		if retryAfter == "" {
+			retryAfter = resp.GetHeader("Retry-After")
+		}
 		if retryAfter != "" {
 			if seconds, err := strconv.Atoi(retryAfter); err == nil {
 				if seconds > 60 {
@@ -1027,15 +1128,58 @@ func (c *Client) getRetryDelay(attempt int, resp *Response) time.Duration {
 	return time.Duration(base * jitter * float64(time.Second))
 }
 
-// logDebug logs a debug message.
-func (c *Client) logDebug(format string, args ...any) {
+// logEvent writes an event to the debug log (log.Printf) when debug
+// logging is on. URLs are written with every query value replaced by "***":
+// the query can hold the cart key, an order key, an email address or a
+// verification key, which mustn't end up in logs.
+func (c *Client) logEvent(event any) {
 	c.mu.RLock()
 	debug := c.debug
 	c.mu.RUnlock()
-	if debug {
-		log.Printf("[CoCart] "+format, args...)
+	if !debug {
+		return
+	}
+	switch e := event.(type) {
+	case RequestEvent:
+		log.Printf("[CoCart] %s %s", e.Method, redactQuery(e.URL))
+	case ResponseEvent:
+		log.Printf("[CoCart] %s %s -> %d (%dms)", e.Method, redactQuery(e.URL), e.Status, e.Duration.Milliseconds())
+	case ErrorEvent:
+		log.Printf("[CoCart] %s %s failed: %v", e.Method, redactQuery(e.URL), e.Err)
+	case RetryEvent:
+		log.Printf("[CoCart] retry %d/%d in %v (%s)", e.Attempt, e.MaxRetries, e.Delay, e.Reason)
+	case AuthRefreshEvent:
+		if e.Success {
+			log.Printf("[CoCart] JWT token refreshed")
+		} else {
+			log.Printf("[CoCart] JWT token refresh failed")
+		}
 	}
 }
+
+// redactQuery returns a URL for debug output, with every query value
+// replaced by "***".
+func redactQuery(rawURL string) string {
+	i := strings.Index(rawURL, "?")
+	if i < 0 {
+		return rawURL
+	}
+	pairs := strings.Split(rawURL[i+1:], "&")
+	for j, pair := range pairs {
+		if eq := strings.Index(pair, "="); eq >= 0 {
+			pairs[j] = pair[:eq] + "=***"
+		}
+	}
+	return rawURL[:i] + "?" + strings.Join(pairs, "&")
+}
+
+// mayStore reports whether a response may be kept in the ETag cache: not
+// when its Cache-Control says no-store or private.
+func mayStore(cacheControl string) bool {
+	return !noStorePattern.MatchString(cacheControl)
+}
+
+var noStorePattern = regexp.MustCompile(`(?i)(^|[\s,])(no-store|private)([\s,;=]|$)`)
 
 // --- Internal helpers ---
 
@@ -1049,8 +1193,11 @@ func isTransientError(err error) bool {
 		strings.Contains(msg, "connection")
 }
 
-func isRetryableStatus(status int) bool {
-	return status == 429 || status == 503
+// isRetryableStatus reports whether a response can be retried. A 429 is
+// refused before the request runs, so any method can be sent again. A 503 can
+// come from a proxy after the store has run the request, so only a GET is.
+func isRetryableStatus(method string, status int) bool {
+	return status == 429 || (status == 503 && method == http.MethodGet)
 }
 
 func encodeParams(params map[string]string) string {
@@ -1059,6 +1206,33 @@ func encodeParams(params map[string]string) string {
 		values.Set(k, v)
 	}
 	return values.Encode()
+}
+
+// routePath returns the REST route of a request URL for error messages: the
+// path from /wp-json on, with no host and no query string (which can hold the
+// cart key or API credentials).
+func routePath(rawURL string) string {
+	path := rawURL
+	if u, err := url.Parse(rawURL); err == nil {
+		path = u.EscapedPath()
+	} else if i := strings.IndexAny(rawURL, "?#"); i >= 0 {
+		path = rawURL[:i]
+	}
+	if i := strings.Index(path, "/wp-json/"); i >= 0 {
+		return path[i+len("/wp-json"):]
+	}
+	return path
+}
+
+// urlQuery matches a URL or path followed by its query string or fragment.
+var urlQuery = regexp.MustCompile(`(?i)((?:https?://|/)[^\s?#"'<>()]*)[?#][^\s"'<>()]*`)
+
+// safeErrorMessage removes the query string from any URL or path in a
+// transport error message: net/http puts the request URL in its errors
+// (Get "https://store.com/wp-json/cocart/v2/cart?cart_key=…": …), and its
+// query string can carry the cart key or API credentials.
+func safeErrorMessage(message string) string {
+	return urlQuery.ReplaceAllString(message, "$1")
 }
 
 func trimSlashes(s string) string {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // CartEndpoint handles all cart-related API operations.
@@ -26,7 +28,15 @@ func (e *CartEndpoint) GetFiltered(ctx context.Context, fields ...string) (*Resp
 	return e.client.Get(ctx, e.basePath, p)
 }
 
-// AddItem adds an item to the cart.
+// AddItem adds an item to the cart. productID is a product ID, variation ID
+// or SKU.
+//
+// options holds the request's other fields: "variation" (a variable
+// product's attributes), "item_data" (custom data), "email", "price" and
+// "return_item", and the choices for CoCart Plus's supported plugins:
+// "convert_to_sub" (a subscription plan's value, "0" for one-time),
+// "recipient_email" (a gift's recipient) and "item_data": {"warranty": key}
+// (a warranty option). Other plugins' fields pass through as given.
 func (e *CartEndpoint) AddItem(ctx context.Context, productID any, quantity int, options ...map[string]any) (*Response, error) {
 	if err := ValidateProductID(productID); err != nil {
 		return nil, err
@@ -220,7 +230,7 @@ func (e *CartEndpoint) GetItemCount(ctx context.Context) (*Response, error) {
 // Create creates a new guest cart session without adding items.
 // Requires CoCart Starter.
 func (e *CartEndpoint) Create(ctx context.Context) (*Response, error) {
-	if err := e.client.RequiresBasic("cart()->create"); err != nil {
+	if err := e.client.RequiresStarter("cart()->create"); err != nil {
 		return nil, err
 	}
 	return e.doPost(ctx, "", nil)
@@ -241,14 +251,59 @@ func (e *CartEndpoint) Update(ctx context.Context, data map[string]any) (*Respon
 	return e.doPost(ctx, "update", data)
 }
 
-// ApplyCoupon applies a coupon to the cart.
-func (e *CartEndpoint) ApplyCoupon(ctx context.Context, couponCode string) (*Response, error) {
-	return e.doPost(ctx, "apply-coupon", map[string]any{"coupon": couponCode})
+// ChangePlan switches a cart item to another subscription plan, or to
+// one-time with "0" (CoCart Plus).
+//
+// The options are in the item's extensions["subscription_schemes"]; pass
+// one's value. It posts the update-item-schema callback on POST /cart/update.
+func (e *CartEndpoint) ChangePlan(ctx context.Context, itemKey, value string) (*Response, error) {
+	if itemKey == "" {
+		return nil, NewValidationError("ChangePlan() requires an item key.", 0, "cocart_missing_item_key")
+	}
+	return e.Update(ctx, map[string]any{
+		"namespace":      "update-item-schema",
+		"item_key":       itemKey,
+		"convert_to_sub": value,
+	})
+}
+
+// GetMini returns a lighter cart response for a mini cart (CoCart Plus).
+func (e *CartEndpoint) GetMini(ctx context.Context, params ...map[string]string) (*Response, error) {
+	return e.doGet(ctx, "mini", params...)
+}
+
+// RemoveAllItems removes every item but keeps the cart's coupons, fees and
+// customer details (CoCart Plus, DELETE /cart/items). Clear empties the whole
+// cart.
+func (e *CartEndpoint) RemoveAllItems(ctx context.Context) (*Response, error) {
+	return e.doDelete(ctx, "items")
+}
+
+// ApplyCoupon applies a coupon to the cart (CoCart Plus). Pass the
+// customer's email for coupons restricted to certain emails when the cart
+// doesn't know it yet.
+func (e *CartEndpoint) ApplyCoupon(ctx context.Context, couponCode string, email ...string) (*Response, error) {
+	// CoCart Plus's apply-coupon route takes `code` (`coupon` is rejected as a missing parameter).
+	data := map[string]any{"code": couponCode}
+	if len(email) > 0 && email[0] != "" {
+		data["email"] = email[0]
+	}
+	return e.doPost(ctx, "apply-coupon", data)
 }
 
 // RemoveCoupon removes a coupon from the cart.
+//
+// The code goes in the URL path, so it's encoded: codes can contain spaces,
+// %, #, ? and other characters. A code containing / can't be removed by
+// code (CoCart Plus matches any path segment without /); RemoveCoupons
+// removes all of them instead.
 func (e *CartEndpoint) RemoveCoupon(ctx context.Context, couponCode string) (*Response, error) {
-	return e.doDelete(ctx, "coupons/"+couponCode)
+	return e.doDelete(ctx, "coupons/"+url.PathEscape(couponCode))
+}
+
+// RemoveCoupons removes every coupon from the cart (CoCart Plus).
+func (e *CartEndpoint) RemoveCoupons(ctx context.Context) (*Response, error) {
+	return e.doDelete(ctx, "coupons")
 }
 
 // GetCoupons returns applied coupons.
@@ -256,8 +311,12 @@ func (e *CartEndpoint) GetCoupons(ctx context.Context) (*Response, error) {
 	return e.doGet(ctx, "", map[string]string{"_fields": "coupons"})
 }
 
-// CheckCoupons validates applied coupons.
-func (e *CartEndpoint) CheckCoupons(ctx context.Context) (*Response, error) {
+// CheckCoupons validates applied coupons (CoCart Plus). Pass the customer's
+// email to check coupons restricted to certain emails.
+func (e *CartEndpoint) CheckCoupons(ctx context.Context, email ...string) (*Response, error) {
+	if len(email) > 0 && email[0] != "" {
+		return e.doGet(ctx, "coupons/validate", map[string]string{"email": email[0]})
+	}
 	return e.doGet(ctx, "coupons/validate")
 }
 
@@ -300,7 +359,9 @@ func (e *CartEndpoint) GetCustomer(ctx context.Context) (*Response, error) {
 	return e.doGet(ctx, "", map[string]string{"_fields": "customer"})
 }
 
-// GetShippingMethods returns available shipping methods.
+// GetShippingMethods returns the cart's shipping packages and their rates.
+// Read them with [Response.GetShippingMethods] (a list of packages) or
+// [Response.GetShipping] (the whole field).
 func (e *CartEndpoint) GetShippingMethods(ctx context.Context) (*Response, error) {
 	return e.doGet(ctx, "", map[string]string{"_fields": "shipping"})
 }
@@ -336,13 +397,19 @@ func (e *CartEndpoint) GetFees(ctx context.Context) (*Response, error) {
 	return e.doGet(ctx, "", map[string]string{"_fields": "fees"})
 }
 
-// AddFee adds a fee to the cart.
-func (e *CartEndpoint) AddFee(ctx context.Context, name string, amount float64, taxable bool) (*Response, error) {
-	return e.doPost(ctx, "add-fee", map[string]any{
+// AddFee adds a fee to the cart (CoCart Plus). Pass a tax class to use when
+// the fee is taxable.
+func (e *CartEndpoint) AddFee(ctx context.Context, name string, amount float64, taxable bool, taxClass ...string) (*Response, error) {
+	// CoCart Plus takes the amount as a string (a number is rejected as rest_invalid_param).
+	data := map[string]any{
 		"name":    name,
-		"amount":  amount,
+		"amount":  strconv.FormatFloat(amount, 'f', -1, 64),
 		"taxable": taxable,
-	})
+	}
+	if len(taxClass) > 0 && taxClass[0] != "" {
+		data["tax_class"] = taxClass[0]
+	}
+	return e.doPost(ctx, "add-fee", data)
 }
 
 // RemoveFees removes all fees from the cart.

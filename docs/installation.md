@@ -35,8 +35,8 @@ client := cocart.NewClient("https://your-store.com",
 	// API namespace (default: "cocart")
 	cocart.WithNamespace("cocart"),
 
-	// CoCart main plugin: MainPluginBasic (default) or MainPluginLegacy
-	cocart.WithMainPlugin(cocart.MainPluginBasic),
+	// CoCart main plugin: MainPluginStarter (default) or MainPluginLegacy
+	cocart.WithMainPlugin(cocart.MainPluginStarter),
 
 	// Retry transient failures (429, 503, timeouts)
 	cocart.WithMaxRetries(2),
@@ -77,7 +77,7 @@ client := cocart.NewClient("https://your-store.com").
 	AddHeader("X-Custom-Header", "value").
 	SetAuthHeaderName("X-Auth-Token").
 	SetETag(true).
-	SetMainPlugin(cocart.MainPluginBasic).
+	SetMainPlugin(cocart.MainPluginStarter).
 	SetDebug(true)
 ```
 
@@ -175,7 +175,7 @@ client := cocart.NewClient("https://your-store.com",
 
 ## Event System
 
-Register callbacks for request/response lifecycle events. These are useful for logging, metrics, or debugging:
+Register callbacks for request/response lifecycle events. These are useful for logging, metrics, or debugging. Every request sends them, the CoCart Plus routes (checkout, account) included:
 
 ```go
 client.OnRequest(func(e cocart.RequestEvent) {
@@ -183,15 +183,19 @@ client.OnRequest(func(e cocart.RequestEvent) {
 })
 client.OnResponse(func(e cocart.ResponseEvent) {
 	fmt.Printf("%d in %dms\n", e.Status, e.Duration.Milliseconds())
+	e.Response.Get("result.code") // the response itself, e.g. "order_placed"
 })
 client.OnError(func(e cocart.ErrorEvent) {
 	fmt.Println("Error:", e.Err)
 })
 ```
 
+> [!WARNING]
+> An event's `URL` is the full request URL, query string included, which can hold the cart key, an order key, an email address or a verification key. Don't forward it as it is (to analytics, logs or another service): send the route, or redact the query first.
+
 ## Debug Mode
 
-Enable debug mode to log request/response details to stderr:
+Enable debug mode to log each request, response, error and retry with the standard `log` package (stderr by default). The URLs it writes have every query value replaced by `***` (`?cart_key=***&order_key=***`), so cart keys, order keys and emails don't reach your logs:
 
 ```go
 client := cocart.NewClient("https://your-store.com",

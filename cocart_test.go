@@ -23,8 +23,8 @@ func TestNewClient(t *testing.T) {
 	if c.GetNamespace() != "cocart" {
 		t.Errorf("expected namespace cocart, got %s", c.GetNamespace())
 	}
-	if c.GetMainPlugin() != MainPluginBasic {
-		t.Errorf("expected main plugin basic, got %s", c.GetMainPlugin())
+	if c.GetMainPlugin() != MainPluginStarter {
+		t.Errorf("expected main plugin starter, got %s", c.GetMainPlugin())
 	}
 }
 
@@ -323,9 +323,9 @@ func TestClientEvents(t *testing.T) {
 	}
 }
 
-func TestClientRequiresBasic(t *testing.T) {
+func TestClientRequiresStarter(t *testing.T) {
 	c := NewClient("https://example.com", WithMainPlugin(MainPluginLegacy))
-	err := c.RequiresBasic("testMethod")
+	err := c.RequiresStarter("testMethod")
 	if err == nil {
 		t.Error("expected error for legacy plugin")
 	}
@@ -374,7 +374,7 @@ func TestURLBuildingWithParams(t *testing.T) {
 }
 
 func TestFieldNormalizationBasic(t *testing.T) {
-	c := NewClient("https://example.com", WithMainPlugin(MainPluginBasic))
+	c := NewClient("https://example.com", WithMainPlugin(MainPluginStarter))
 	url := c.buildURL("cart", map[string]string{"fields": "items,totals"})
 	if !contains(url, "_fields=items") {
 		t.Errorf("basic plugin should normalize fields to _fields: %s", url)
@@ -476,7 +476,7 @@ func TestClientCartKeyHeaderBasicPluginOnlySendsOneHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, WithCartKey("guest-key"), WithMainPlugin(MainPluginBasic))
+	c := NewClient(server.URL, WithCartKey("guest-key"), WithMainPlugin(MainPluginStarter))
 	_, err := c.Get(context.Background(), "cart")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -66,12 +66,41 @@ All error types provide these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Message` | `string` | Human-readable error message from the API |
+| `Message` | `string` | Error message: the request's method and route, the API's message and its code |
 | `ErrorCode` | `string` | API error code (e.g. `cocart_product_not_found`) |
 | `HTTPCode` | `int` | HTTP status code (400, 401, 403, 500, etc.) |
 | `ResponseData` | `map[string]any` | Full API response body for debugging |
 
+And these methods:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `Fields()` | `map[string]string` | Every field at fault, by path (`billing.postcode`), with its message. An empty map when the error isn't about fields |
+| `Field()` | `string` | The first field at fault, or `""` |
+| `Reason()` | `string` | The underlying plugin's own reason, when there is one, or `""` |
+| `GetCart()` | `*CartResponse` | The cart sent with the error, or `nil` (see [Item No Longer in the Cart](#item-no-longer-in-the-cart)) |
+
+An API error's message names the request's method and route, e.g. `POST /cocart/v2/cart/add-item: Product not found. [cocart_product_not_found]`. It never includes the full URL: its query string can carry the cart key or API credentials, so an app can log or show messages safely. Connection errors (`network_error`) lose the query string too, and don't wrap the `net/http` error, which holds the full URL.
+
 `VersionError` also has a `Method` field containing the method name that requires CoCart Starter.
+
+## Every Field at Fault
+
+CoCart Plus checks a whole form at once (checkout addresses, account details, registration) and reports every field at fault in one error, so a form can show them all:
+
+```go
+_, err := client.Checkout().Update(ctx, map[string]any{
+	"billing_address": map[string]any{"postcode": "nope", "phone": ""},
+})
+
+var cocartErr *cocart.CoCartError
+if errors.As(err, &cocartErr) {
+	for field, message := range cocartErr.Fields() {
+		showFieldError(field, message) // "billing.postcode" → "Please enter a valid postcode."
+	}
+	focusField(cocartErr.Field()) // the first one
+}
+```
 
 ## Inspecting the Full API Response
 
@@ -121,9 +150,13 @@ Every HTTP response includes a **status code** that tells you whether the reques
 |-------------|-----------|----------------|
 | 400 | `*ValidationError` | Invalid product ID, out of stock, invalid quantity, missing required fields |
 | 401 | `*AuthenticationError` | Missing or invalid credentials |
-| 403 | `*AuthenticationError` | Expired JWT token, insufficient permissions |
-| 404 | `*CoCartError` | Endpoint not found, item key not found |
-| 500 | `*CoCartError` | Server error |
+| 403 | `*AuthenticationError` | Expired JWT token, signed in but not allowed |
+| 404 | `*CoCartError` | Endpoint not found, item key not found, not the customer's order |
+| 409 | `*CoCartError` | A state that refuses the action: `cocart_payment_in_progress`, `cocart_checkout_total_mismatch`, an order that can't be paid or cancelled. Never a `*ValidationError`, even when the code contains `invalid` |
+| 429 | `*CoCartError` | Rate limited. With `WithMaxRetries`, the client waits as long as `RateLimit-Retry-After` (or a proxy's `Retry-After`) says, up to 60 seconds, and tries again |
+| 500+ | `*CoCartError` | Server error. Never a `*ValidationError` |
+
+For other statuses, a code containing `invalid` or `missing` is a `*ValidationError`, and one containing `authenticat` an `*AuthenticationError`.
 
 ## Response Error Helpers
 
@@ -208,7 +241,7 @@ _, err := client.Cart().AddItem(ctx, 999999, 1)
 
 var valErr *cocart.ValidationError
 if errors.As(err, &valErr) {
-	// valErr.Message   => "Product not found"
+	// valErr.Message   => "POST /cocart/v2/cart/add-item: Product not found. [cocart_product_not_found]"
 	// valErr.ErrorCode => "cocart_product_not_found"
 }
 ```
@@ -223,6 +256,49 @@ if errors.As(err, &valErr) {
 	// valErr.ErrorCode => "cocart_not_enough_in_stock"
 }
 ```
+
+### Expired Cart Key
+
+CoCart Starter 5 refuses a cart key with no cart session on every cart route (`404 cocart_invalid_cart`), for example after the cart expired. The client then forgets the stored key (in its storage too) and retries the request once as a new guest, so this error doesn't reach your code for a guest; a fresh cart key comes back as usual.
+
+If a `SessionManager` keeps the cart key in a storage the client doesn't have, save the new key there with `session.SetCartKey(client.GetCartKey())`. See [Sessions](sessions.md).
+
+### Item No Longer in the Cart
+
+Getting, updating or removing an item whose key isn't in the cart (for example, another tab already removed it) fails with `404 cocart_item_not_in_cart`. Since CoCart Starter 5 the error carries the cart as it is now, so you can show it without fetching the cart again.
+
+```go
+_, err := client.Cart().UpdateItem(ctx, itemKey, 2)
+
+var cocartErr *cocart.CoCartError
+if errors.As(err, &cocartErr) && cocartErr.ErrorCode == "cocart_item_not_in_cart" {
+	if cart := cocartErr.GetCart(); cart != nil { // nil with CoCart 4.x
+		render(cart)
+	}
+}
+```
+
+### Quantity Reduced to the Maximum
+
+Adding more than the purchase limit or the stock allows isn't an error: CoCart adds the maximum and says so with a notice.
+
+```go
+response, err := client.Cart().AddItem(ctx, 123, 50)
+notices := response.GetNotices()["notice"] // [`The quantity of "Beanie" was reduced to 5, the most allowed in the cart.`]
+```
+
+### Rate Limits
+
+With rate limiting on (CoCart Plus), every response carries `RateLimit-*` headers:
+
+```go
+rateLimit := response.GetRateLimit()
+if rateLimit.Remaining != nil {
+	fmt.Println(*rateLimit.Limit, *rateLimit.Remaining, *rateLimit.Reset) // 25 24 1791108883
+}
+```
+
+`Reset` is the Unix time the window resets, and `RetryAfter` the seconds to wait after a 429; a field is `nil` when its header wasn't sent. Exceeding the limit returns 429 `rate_limit_exceeded`, which the client retries when `WithMaxRetries` is set, after the seconds `RateLimit-Retry-After` gives (or a proxy's `Retry-After`), up to 60.
 
 ### CoCart Plugin Required
 

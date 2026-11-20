@@ -67,7 +67,7 @@ func TestProductsFindAcceptsSku(t *testing.T) {
 	}
 }
 
-func TestProductsFindBySlugRequiresBasic(t *testing.T) {
+func TestProductsFindBySlugRequiresStarter(t *testing.T) {
 	c := NewClient("https://example.com", WithMainPlugin(MainPluginLegacy))
 	_, err := c.Products().FindBySlug(context.Background(), "widget")
 	if err == nil {
@@ -194,7 +194,7 @@ func TestProductsByPriceRangePartial(t *testing.T) {
 	}
 }
 
-func TestProductsBrandsRequiresBasic(t *testing.T) {
+func TestProductsBrandsRequiresStarter(t *testing.T) {
 	c := NewClient("https://example.com", WithMainPlugin(MainPluginLegacy))
 	_, err := c.Products().Brands(context.Background())
 	if err == nil {

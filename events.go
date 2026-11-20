@@ -6,6 +6,11 @@ import (
 )
 
 // RequestEvent is emitted before an HTTP request is sent.
+//
+// URL is the full request URL, query string included, which can hold the
+// cart key, an order key, an email address or a verification key. Don't
+// forward it (to analytics, logs or another service) as it is. The client's
+// own debug output (WithDebug) hides every query value.
 type RequestEvent struct {
 	Method  string
 	URL     string
@@ -13,12 +18,15 @@ type RequestEvent struct {
 	Body    string
 }
 
-// ResponseEvent is emitted after an HTTP response is received.
+// ResponseEvent is emitted after an HTTP response is received. URL is the
+// full request URL, as for RequestEvent: don't forward it as it is.
 type ResponseEvent struct {
 	Method   string
 	URL      string
 	Status   int
 	Duration time.Duration
+	// Response is the response received.
+	Response *Response
 }
 
 // ErrorEvent is emitted when a request fails.
@@ -45,11 +53,14 @@ type AuthRefreshEvent struct {
 
 // eventEmitter manages typed event listeners.
 type eventEmitter struct {
-	mu              sync.RWMutex
-	requestHandlers []func(RequestEvent)
-	responseHandlers []func(ResponseEvent)
-	errorHandlers   []func(ErrorEvent)
-	retryHandlers   []func(RetryEvent)
+	// logger writes each event to the client's debug output, or is nil.
+	logger func(event any)
+
+	mu                  sync.RWMutex
+	requestHandlers     []func(RequestEvent)
+	responseHandlers    []func(ResponseEvent)
+	errorHandlers       []func(ErrorEvent)
+	retryHandlers       []func(RetryEvent)
 	authRefreshHandlers []func(AuthRefreshEvent)
 }
 
@@ -128,6 +139,7 @@ func (c *Client) OnAuthRefresh(fn func(AuthRefreshEvent)) func() {
 }
 
 func (e *eventEmitter) emitRequest(evt RequestEvent) {
+	e.log(evt)
 	e.mu.RLock()
 	handlers := make([]func(RequestEvent), len(e.requestHandlers))
 	copy(handlers, e.requestHandlers)
@@ -141,6 +153,7 @@ func (e *eventEmitter) emitRequest(evt RequestEvent) {
 }
 
 func (e *eventEmitter) emitResponse(evt ResponseEvent) {
+	e.log(evt)
 	e.mu.RLock()
 	handlers := make([]func(ResponseEvent), len(e.responseHandlers))
 	copy(handlers, e.responseHandlers)
@@ -154,6 +167,7 @@ func (e *eventEmitter) emitResponse(evt ResponseEvent) {
 }
 
 func (e *eventEmitter) emitError(evt ErrorEvent) {
+	e.log(evt)
 	e.mu.RLock()
 	handlers := make([]func(ErrorEvent), len(e.errorHandlers))
 	copy(handlers, e.errorHandlers)
@@ -167,6 +181,7 @@ func (e *eventEmitter) emitError(evt ErrorEvent) {
 }
 
 func (e *eventEmitter) emitRetry(evt RetryEvent) {
+	e.log(evt)
 	e.mu.RLock()
 	handlers := make([]func(RetryEvent), len(e.retryHandlers))
 	copy(handlers, e.retryHandlers)
@@ -180,6 +195,7 @@ func (e *eventEmitter) emitRetry(evt RetryEvent) {
 }
 
 func (e *eventEmitter) emitAuthRefresh(evt AuthRefreshEvent) {
+	e.log(evt)
 	e.mu.RLock()
 	handlers := make([]func(AuthRefreshEvent), len(e.authRefreshHandlers))
 	copy(handlers, e.authRefreshHandlers)
@@ -189,6 +205,12 @@ func (e *eventEmitter) emitAuthRefresh(evt AuthRefreshEvent) {
 			defer func() { recover() }()
 			fn(evt)
 		}()
+	}
+}
+
+func (e *eventEmitter) log(evt any) {
+	if e.logger != nil {
+		e.logger(evt)
 	}
 }
 

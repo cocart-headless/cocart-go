@@ -164,8 +164,14 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to get shipping methods:", err)
 	}
-	shipping := shippingResp.GetShippingMethods()
-	fmt.Printf("Shipping packages: %d\n", len(shipping))
+	// One package per shipment, each with its rates keyed by rate ID.
+	packages := shippingResp.GetShippingMethods()
+	fmt.Printf("Shipping packages: %d\n", len(packages))
+	for _, pkg := range packages {
+		for rateID, rate := range pkg.Rates {
+			fmt.Printf("  - %s: %s (%s)\n", rateID, rate.Label, rate.Cost) // cost in minor units
+		}
+	}
 
 	// --- 12. Cart summary with formatted prices ---
 

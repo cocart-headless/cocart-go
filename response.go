@@ -2,6 +2,7 @@ package cocart
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -206,12 +207,16 @@ func (r *Response) IsEmpty() bool {
 	return r.GetItemCount() == 0
 }
 
-// GetNotices returns notices from the response data.
-func (r *Response) GetNotices() []any {
-	if v, ok := r.Get("notices").([]any); ok {
-		return v
+// GetNotices returns the notices keyed by type (success, error, notice, info),
+// each a list of messages, e.g. {"success": ["“Beanie” has been added to your cart."]}.
+// It returns an empty map when there are none (CoCart Starter 5 sends {},
+// CoCart 4.x []).
+func (r *Response) GetNotices() map[string][]string {
+	notices, _ := unmarshalField[ObjectMap[[]string]](r, "notices")
+	if notices == nil {
+		return map[string][]string{}
 	}
-	return nil
+	return notices
 }
 
 // GetCoupons returns applied coupons from the response data.
@@ -237,16 +242,62 @@ func (r *Response) GetCurrency() CurrencyInfo {
 	return currency
 }
 
-// GetShippingMethods returns shipping packages from the response data.
+// GetShippingMethods returns the shipping packages from the response data,
+// in the order CoCart sent them. Each package has its rates keyed by rate ID.
+// CoCart sends the packages keyed by package ID under shipping.packages; see
+// [Response.GetShipping] for the whole shipping field.
 func (r *Response) GetShippingMethods() []ShippingPackage {
-	shipping, _ := unmarshalField[[]ShippingPackage](r, "shipping")
-	return shipping
+	shipping, ok := r.rawField("shipping")
+	if !ok {
+		return nil
+	}
+	if isJSONObject(shipping) {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(shipping, &fields); err != nil {
+			return nil
+		}
+		shipping = fields["packages"]
+	}
+	values, _ := orderedValues(shipping)
+	return decodeEach[ShippingPackage](values)
 }
 
-// GetFees returns cart fees from the response data.
+// GetShipping returns the cart's whole shipping field: the package count,
+// whether shipping has been calculated, and the packages keyed by package
+// ID. It returns nil when the response has none.
+func (r *Response) GetShipping() *CartShipping {
+	shipping, ok := r.rawField("shipping")
+	if !ok || !isJSONObject(shipping) {
+		return nil
+	}
+	var result CartShipping
+	if err := json.Unmarshal(shipping, &result); err != nil {
+		return nil
+	}
+	return &result
+}
+
+// GetFees returns cart fees from the response data, as a list in the order
+// CoCart sent them. The cart keys fees by fee ID ({} when there are none;
+// [] from CoCart 4.x).
 func (r *Response) GetFees() []CartFee {
-	fees, _ := unmarshalField[[]CartFee](r, "fees")
-	return fees
+	fees, ok := r.rawField("fees")
+	if !ok {
+		return nil
+	}
+	values, _ := orderedValues(fees)
+	return decodeEach[CartFee](values)
+}
+
+// GetExtensions returns the cart's extensions: data plugins add to the cart,
+// such as subscription recurring_totals (see docs/extension-data.md). It
+// returns an empty map when there is none.
+func (r *Response) GetExtensions() map[string]any {
+	extensions, _ := unmarshalField[ObjectMap[any]](r, "extensions")
+	if extensions == nil {
+		return map[string]any{}
+	}
+	return extensions
 }
 
 // GetTaxes returns cart tax lines from the response data, normalized to a
@@ -337,6 +388,29 @@ func (r *Response) IsNotModified() bool {
 	return r.StatusCode == 304
 }
 
+// GetRateLimit returns the RateLimit-* headers CoCart Plus sends when rate
+// limiting is on. A field is nil when its header wasn't sent.
+func (r *Response) GetRateLimit() RateLimitInfo {
+	number := func(name string) *int {
+		v := strings.TrimSpace(r.GetHeader(name))
+		if v == "" {
+			return nil
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil
+		}
+		n := int(f)
+		return &n
+	}
+	return RateLimitInfo{
+		Limit:      number("RateLimit-Limit"),
+		Remaining:  number("RateLimit-Remaining"),
+		Reset:      number("RateLimit-Reset"),
+		RetryAfter: number("RateLimit-Retry-After"),
+	}
+}
+
 // GetCacheStatus returns the CoCart-Cache header value (HIT, MISS, or SKIP).
 func (r *Response) GetCacheStatus() string {
 	return r.GetHeader("CoCart-Cache")
@@ -382,6 +456,17 @@ func getDefault(defaultValue []any) any {
 		return defaultValue[0]
 	}
 	return nil
+}
+
+// rawField returns a top-level field of the response body as raw JSON, so it
+// can be decoded with its key order intact.
+func (r *Response) rawField(field string) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(r.Body, &fields); err != nil {
+		return nil, false
+	}
+	v, ok := fields[field]
+	return v, ok
 }
 
 // unmarshalField extracts a field from the parsed response and unmarshals it into T.

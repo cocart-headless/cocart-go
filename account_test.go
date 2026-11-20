@@ -2,9 +2,9 @@ package cocart
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -52,47 +52,88 @@ func TestAccountUpdateProfile(t *testing.T) {
 	}
 }
 
-func TestAccountChangePasswordRemapsFields(t *testing.T) {
-	var body map[string]string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/cocart/v2/my-account/change-password") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
-
-	c := NewClient(server.URL)
-	c.Account().ChangePassword(context.Background(), "old", "newpass", "newpass")
-
-	if body["password_current"] != "old" {
-		t.Errorf("password_current = %q, want %q", body["password_current"], "old")
+func TestAccountChangePasswordPostsOnlyThePasswordFields(t *testing.T) {
+	s := newRecordingServer(t)
+	s.queue(200, `{"object":"customer","result":{"code":"account_updated"}}`)
+	c := NewClient(s.URL, WithBasicAuth("user", "pass"))
+	if _, err := c.Account().ChangePassword(context.Background(), "old-password", "new-password", "new-password"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if body["password_1"] != "newpass" {
-		t.Errorf("password_1 = %q, want %q", body["password_1"], "newpass")
+
+	requests := s.all()
+	if len(requests) != 1 {
+		t.Fatalf("sent %d requests, want 1", len(requests))
 	}
-	if body["password_2"] != "newpass" {
-		t.Errorf("password_2 = %q, want %q", body["password_2"], "newpass")
+	if requests[0].Method != http.MethodPost || requests[0].Path != "/wp-json/cocart/v2/my-account" {
+		t.Errorf("request = %s %s", requests[0].Method, requests[0].Path)
+	}
+	want := map[string]any{"password_current": "old-password", "password_1": "new-password", "password_2": "new-password"}
+	if got := jsonBody(t, requests[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("body = %v, want %v", got, want)
 	}
 }
 
 func TestAccountGetOrders(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/cocart/v2/my-account/orders") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.URL.Query().Get("per_page") != "5" {
-			t.Errorf("expected per_page=5, got %s", r.URL.Query().Get("per_page"))
-		}
-		w.Write([]byte(`{"orders":[]}`))
-	}))
-	defer server.Close()
+	tests := []struct {
+		name   string
+		params map[string]any
+		query  string
+	}{
+		{"no filters", nil, ""},
+		{"pagination", map[string]any{"page": 2, "per_page": 20, "order": "ASC"}, "order=ASC&page=2&per_page=20"},
+		{
+			"filters, joining a list of statuses and meta keys with commas",
+			map[string]any{
+				"status":                  []string{"processing", "on-hold"},
+				"after":                   "2026-01-01T00:00:00",
+				"before":                  "2026-12-31T23:59:59",
+				"subscription_order_type": "renewal",
+				"formatted":               true,
+				"meta_keys":               []string{"gift_message", "_configuration"},
+			},
+			"after=2026-01-01T00%3A00%3A00&before=2026-12-31T23%3A59%3A59&formatted=true&meta_keys=gift_message%2C_configuration&status=processing%2Con-hold&subscription_order_type=renewal",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newRecordingServer(t)
+			c := NewClient(s.URL, WithBasicAuth("user", "pass"))
+			if _, err := c.Account().GetOrders(context.Background(), tt.params); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req := s.last(t)
+			if req.Path != "/wp-json/cocart/v2/my-account/orders" {
+				t.Errorf("path = %s", req.Path)
+			}
+			if got := req.Query.Encode(); got != tt.query {
+				t.Errorf("query = %s, want %s", got, tt.query)
+			}
+		})
+	}
+}
 
-	c := NewClient(server.URL)
-	_, err := c.Account().GetOrders(context.Background(), map[string]string{"per_page": "5"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestAccountDocumentParams(t *testing.T) {
+	s := newRecordingServer(t)
+	c := NewClient(s.URL, WithBasicAuth("user", "pass"))
+	ctx := context.Background()
+	params := map[string]any{"formatted": false, "meta_keys": []string{"gift_message"}}
+	c.Account().GetProfile(ctx, params)
+	c.Account().GetOrder(ctx, 42, params)
+	c.Account().GetGuestOrder(ctx, 42, "jane@example.com", params)
+	c.Account().GetSubscriptions(ctx, map[string]any{"status": []string{"active", "on-hold"}, "formatted": true})
+
+	want := []string{
+		"formatted=false&meta_keys=gift_message",
+		"formatted=false&meta_keys=gift_message",
+		"email=jane%40example.com&formatted=false&meta_keys=gift_message",
+		"formatted=true&status=active%2Con-hold",
+	}
+	var got []string
+	for _, r := range s.all() {
+		got = append(got, r.Query.Encode())
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("queries =\n%v\nwant\n%v", got, want)
 	}
 }
 
@@ -131,38 +172,37 @@ func TestAccountGetGuestOrderSendsEmail(t *testing.T) {
 	}
 }
 
-func TestAccountGetOrderDownloads(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/cocart/v2/my-account/orders/3/downloads") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-
-	c := NewClient(server.URL)
-	_, err := c.Account().GetOrderDownloads(context.Background(), 3)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestAccountOrderDownloads(t *testing.T) {
+	tests := []struct {
+		name  string
+		call  func(ctx context.Context, a *AccountEndpoint) (*Response, error)
+		query string
+	}{
+		{"customer", func(ctx context.Context, a *AccountEndpoint) (*Response, error) { return a.GetOrderDownloads(ctx, 123) }, ""},
+		{"guest", func(ctx context.Context, a *AccountEndpoint) (*Response, error) {
+			return a.GetGuestOrderDownloads(ctx, 123, "jane@example.com")
+		}, "email=jane%40example.com"},
 	}
-}
-
-func TestAccountGetGuestOrderDownloads(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/cocart/v2/my-account/orders/3/downloads") {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.URL.Query().Get("email") != "g@x.com" {
-			t.Errorf("expected email param")
-		}
-		w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-
-	c := NewClient(server.URL)
-	_, err := c.Account().GetGuestOrderDownloads(context.Background(), 3, "g@x.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newRecordingServer(t)
+			s.queue(200, `{"downloads":[{"download_id":"abc","download_name":"Guide"}]}`)
+			resp, err := tt.call(context.Background(), NewClient(s.URL).Account())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req := s.last(t)
+			if req.Method != http.MethodGet || req.Path != "/wp-json/cocart/v2/my-account/orders/123/downloads" {
+				t.Errorf("request = %s %s", req.Method, req.Path)
+			}
+			if got := req.Query.Encode(); got != tt.query {
+				t.Errorf("query = %s, want %s", got, tt.query)
+			}
+			// Returned as sent.
+			if string(resp.Body) != `{"downloads":[{"download_id":"abc","download_name":"Guide"}]}` {
+				t.Errorf("body = %s", resp.Body)
+			}
+		})
 	}
 }
 
@@ -182,17 +222,20 @@ func TestAccountGetDownloads(t *testing.T) {
 	}
 }
 
-func TestAccountGetReviews(t *testing.T) {
+func TestAccountGetReviewsUsesProductsReviewsMine(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/cocart/v2/my-account/reviews") {
+		if r.URL.Path != "/wp-json/cocart/v2/products/reviews/mine" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("per_page") != "5" {
+			t.Errorf("per_page = %q, want 5", r.URL.Query().Get("per_page"))
 		}
 		w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
 
 	c := NewClient(server.URL)
-	_, err := c.Account().GetReviews(context.Background())
+	_, err := c.Account().GetReviews(context.Background(), &PaginationParams{PerPage: 5})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
