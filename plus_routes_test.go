@@ -307,7 +307,7 @@ func TestAccountPlusRoutes(t *testing.T) {
 	account.VerifyEmail(ctx, "k3y", 7)
 	account.SendOrderEmailVerification(ctx)
 	account.VerifyOrderEmail(ctx, "k3y", 7)
-	account.GetSubscriptions(ctx, map[string]any{"page": 2})
+	account.GetSubscriptions(ctx, map[string]string{"page": "2"})
 	account.GetSubscription(ctx, 9)
 	account.GetSubscription(ctx, 9, "guest@example.com")
 	account.SuspendSubscription(ctx, 9)

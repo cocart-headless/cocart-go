@@ -80,7 +80,7 @@ func (e *AccountEndpoint) Register(ctx context.Context, customer RegisterCustome
 // GetProfile returns the signed-in customer: name, email, addresses, order
 // stats and actions. params optionally takes formatted and meta_keys (a
 // []string).
-func (e *AccountEndpoint) GetProfile(ctx context.Context, params ...map[string]any) (*Response, error) {
+func (e *AccountEndpoint) GetProfile(ctx context.Context, params ...map[string]string) (*Response, error) {
 	return e.doRawGet(ctx, "", documentQuery(firstParams(params)))
 }
 
@@ -113,26 +113,27 @@ func (e *AccountEndpoint) UpdateAddress(ctx context.Context, data map[string]any
 
 // GetOrders returns the customer's orders, newest first, with pagination
 // (also in X-WP-Total and X-WP-TotalPages). params optionally takes page,
-// per_page, order ("ASC" or "DESC"), status (one, or a []string of
-// statuses), after and before (ISO 8601 dates), subscription_order_type
-// ("parent", "renewal", "switch" or "resubscribe"), formatted and meta_keys
-// (a []string). Pass nil for none.
-func (e *AccountEndpoint) GetOrders(ctx context.Context, params map[string]any) (*Response, error) {
+// per_page, order ("ASC" or "DESC"), status (one, or several comma-joined:
+// "processing,on-hold"), after and before (ISO 8601 dates),
+// subscription_order_type ("parent", "renewal", "switch" or "resubscribe"),
+// formatted ("true") and meta_keys (comma-joined). Pass nil for none.
+func (e *AccountEndpoint) GetOrders(ctx context.Context, params map[string]string) (*Response, error) {
 	return e.doRawGet(ctx, "orders", documentQuery(params))
 }
 
 // GetOrder returns one of the customer's orders. Someone else's order is 404
-// cocart_order_not_found. params optionally takes formatted and meta_keys.
-func (e *AccountEndpoint) GetOrder(ctx context.Context, id int, params ...map[string]any) (*Response, error) {
+// cocart_order_not_found. params optionally takes formatted ("true") and
+// meta_keys (comma-joined).
+func (e *AccountEndpoint) GetOrder(ctx context.Context, id int, params ...map[string]string) (*Response, error) {
 	return e.doRawGet(ctx, fmt.Sprintf("orders/%d", id), documentQuery(firstParams(params)))
 }
 
 // GetGuestOrder returns a guest's order, looked up with its billing email.
 // It comes without its key. Lookups are rate limited (429
-// cocart_guest_lookup_rate_limited). params optionally takes formatted and
-// meta_keys.
-func (e *AccountEndpoint) GetGuestOrder(ctx context.Context, id int, email string, params ...map[string]any) (*Response, error) {
-	query := queryOf(firstParams(params))
+// cocart_guest_lookup_rate_limited). params optionally takes formatted
+// ("true") and meta_keys (comma-joined).
+func (e *AccountEndpoint) GetGuestOrder(ctx context.Context, id int, email string, params ...map[string]string) (*Response, error) {
+	query := copyQuery(firstParams(params))
 	query["email"] = email
 	return e.doRawGet(ctx, fmt.Sprintf("orders/%d", id), query)
 }
@@ -196,9 +197,9 @@ func (e *AccountEndpoint) VerifyOrderEmail(ctx context.Context, key string, user
 
 // GetSubscriptions returns the customer's subscriptions, with pagination.
 // params optionally takes page, per_page, order ("ASC" or "DESC"), status
-// (one, or a []string of statuses), formatted and meta_keys (a []string).
-// Pass nil for none.
-func (e *AccountEndpoint) GetSubscriptions(ctx context.Context, params map[string]any) (*Response, error) {
+// (one, or several comma-joined: "active,on-hold"), formatted ("true") and
+// meta_keys (comma-joined). Pass nil for none.
+func (e *AccountEndpoint) GetSubscriptions(ctx context.Context, params map[string]string) (*Response, error) {
 	return e.doRawGet(ctx, "subscriptions", documentQuery(params))
 }
 
@@ -273,12 +274,10 @@ func (e *AccountEndpoint) RequestOrderWithdrawal(ctx context.Context, data map[s
 }
 
 // documentQuery returns the query for optional parameters (formatted,
-// meta_keys and any others given), or nil when there are none. A list is
-// comma-joined, and a boolean is "true" or "false".
-func documentQuery(params map[string]any) map[string]string {
-	query := queryOf(params)
-	if len(query) == 0 {
+// meta_keys and any others given), or nil when there are none.
+func documentQuery(params map[string]string) map[string]string {
+	if len(params) == 0 {
 		return nil
 	}
-	return query
+	return copyQuery(params)
 }

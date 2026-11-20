@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -217,7 +219,7 @@ func callCheckoutFixture(t *testing.T, client *Client, f checkoutFixture) (any, 
 	case "getCheckout":
 		// The object argument maps onto Get's optional parameters.
 		if len(args) > 0 {
-			return co.Get(ctx, obj(0))
+			return co.Get(ctx, queryOf(obj(0)))
 		}
 		return co.Get(ctx)
 	case "updateCheckout":
@@ -247,7 +249,7 @@ func callCheckoutFixture(t *testing.T, client *Client, f checkoutFixture) (any, 
 		return co.GetAddressDetails(ctx, a["address_id"].(string), a["provider"].(string))
 	case "getOrderReceived":
 		if len(args) > 2 {
-			return co.GetOrderReceived(ctx, num(0), str(1), obj(2))
+			return co.GetOrderReceived(ctx, num(0), str(1), queryOf(obj(2)))
 		}
 		return co.GetOrderReceived(ctx, num(0), str(1))
 	case "payForOrder":
@@ -345,4 +347,34 @@ func normalizeJSON(v any) any {
 	var out any
 	json.Unmarshal(raw, &out)
 	return out
+}
+
+// queryOf turns a fixture's JSON arguments into the query strings the SDK
+// takes, as a caller would write them: a list comma-joined, a boolean "true"
+// or "false", nil values left out.
+func queryOf(params map[string]any) map[string]string {
+	query := make(map[string]string, len(params))
+	for k, v := range params {
+		switch value := v.(type) {
+		case nil:
+			continue
+		case string:
+			query[k] = value
+		case []string:
+			query[k] = strings.Join(value, ",")
+		case []any:
+			parts := make([]string, len(value))
+			for i, part := range value {
+				parts[i] = fmt.Sprint(part)
+			}
+			query[k] = strings.Join(parts, ",")
+		case bool:
+			query[k] = strconv.FormatBool(value)
+		case float64:
+			query[k] = strconv.FormatFloat(value, 'f', -1, 64)
+		default:
+			query[k] = fmt.Sprint(value)
+		}
+	}
+	return query
 }

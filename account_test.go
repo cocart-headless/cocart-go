@@ -76,20 +76,20 @@ func TestAccountChangePasswordPostsOnlyThePasswordFields(t *testing.T) {
 func TestAccountGetOrders(t *testing.T) {
 	tests := []struct {
 		name   string
-		params map[string]any
+		params map[string]string
 		query  string
 	}{
 		{"no filters", nil, ""},
-		{"pagination", map[string]any{"page": 2, "per_page": 20, "order": "ASC"}, "order=ASC&page=2&per_page=20"},
+		{"pagination", map[string]string{"page": "2", "per_page": "20", "order": "ASC"}, "order=ASC&page=2&per_page=20"},
 		{
-			"filters, joining a list of statuses and meta keys with commas",
-			map[string]any{
-				"status":                  []string{"processing", "on-hold"},
+			"filters, with several statuses and meta keys comma-joined",
+			map[string]string{
+				"status":                  "processing,on-hold",
 				"after":                   "2026-01-01T00:00:00",
 				"before":                  "2026-12-31T23:59:59",
 				"subscription_order_type": "renewal",
-				"formatted":               true,
-				"meta_keys":               []string{"gift_message", "_configuration"},
+				"formatted":               "true",
+				"meta_keys":               "gift_message,_configuration",
 			},
 			"after=2026-01-01T00%3A00%3A00&before=2026-12-31T23%3A59%3A59&formatted=true&meta_keys=gift_message%2C_configuration&status=processing%2Con-hold&subscription_order_type=renewal",
 		},
@@ -116,11 +116,14 @@ func TestAccountDocumentParams(t *testing.T) {
 	s := newRecordingServer(t)
 	c := NewClient(s.URL, WithBasicAuth("user", "pass"))
 	ctx := context.Background()
-	params := map[string]any{"formatted": false, "meta_keys": []string{"gift_message"}}
+	params := map[string]string{"formatted": "false", "meta_keys": "gift_message"}
 	c.Account().GetProfile(ctx, params)
 	c.Account().GetOrder(ctx, 42, params)
 	c.Account().GetGuestOrder(ctx, 42, "jane@example.com", params)
-	c.Account().GetSubscriptions(ctx, map[string]any{"status": []string{"active", "on-hold"}, "formatted": true})
+	c.Account().GetSubscriptions(ctx, map[string]string{"status": "active,on-hold", "formatted": "true"})
+	if _, ok := params["email"]; ok {
+		t.Error("GetGuestOrder added the email to the caller's map")
+	}
 
 	want := []string{
 		"formatted=false&meta_keys=gift_message",

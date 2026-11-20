@@ -19,7 +19,7 @@ account := client.Account()
 
 Every account response is a document that says what it is in `object` (`customer`, `order`, `subscription`…). A request that changes something puts what it did first, in `result`: a `code` to branch on and a `message` for the customer. `actions` lists what can be done next, keyed by action, each with a `label`, `method` and `href`.
 
-Amounts are minor-unit strings (`"4999"`), as in the cart. Methods that read a document take optional parameters: `"formatted": true` for amounts ready to display (`"$49.99"`), and `"meta_keys"` (a `[]string`) to narrow the order or customer `meta` to the keys you need.
+Amounts are minor-unit strings (`"4999"`), as in the cart. Methods that read a document take optional parameters as a `map[string]string`: `"formatted": "true"` for amounts ready to display (`"$49.99"`), and `"meta_keys"` (comma-joined, e.g. `"gift_message,_configuration"`) to narrow the order or customer `meta` to the keys you need.
 
 ## Register
 
@@ -74,7 +74,7 @@ customer.GetString("billing.formatted", "")    // the billing address on one lin
 customer.Get("related.recent_order")           // the most recent order, or nil
 
 // Amounts ready to display, and only the meta keys you need
-customer, err = client.Account().GetProfile(ctx, map[string]any{"formatted": true, "meta_keys": []string{"loyalty_tier"}})
+customer, err = client.Account().GetProfile(ctx, map[string]string{"formatted": "true", "meta_keys": "loyalty_tier"})
 ```
 
 ### Update Profile
@@ -138,10 +138,10 @@ response.GetInt("pagination.total_items", 0)
 response.GetTotalPages()
 
 // Processing and on-hold orders from this year, 20 per page
-response, err = client.Account().GetOrders(ctx, map[string]any{
-	"status":   []string{"processing", "on-hold"},
+response, err = client.Account().GetOrders(ctx, map[string]string{
+	"status":   "processing,on-hold",
 	"after":    "2026-01-01T00:00:00",
-	"per_page": 20,
+	"per_page": "20",
 })
 ```
 
@@ -150,11 +150,11 @@ response, err = client.Account().GetOrders(ctx, map[string]any{
 | `page` | Page number | `1` |
 | `per_page` | Results per page | `10` |
 | `order` | `"ASC"` or `"DESC"` | `"DESC"` |
-| `status` | One status, or a `[]string` (sent comma-joined) | every status |
+| `status` | One status, or several comma-joined (`"processing,on-hold"`) | every status |
 | `after`, `before` | Only orders placed after/before this date (ISO 8601; without an offset it's UTC) | — |
 | `subscription_order_type` | `"parent"`, `"renewal"`, `"switch"` or `"resubscribe"`: only orders with this relationship to a subscription | — |
-| `formatted` | `true` for amounts formatted for display | `false` |
-| `meta_keys` | A `[]string`: only these keys in each `meta` | every allowed key |
+| `formatted` | `"true"` for amounts formatted for display | `"false"` |
+| `meta_keys` | Only these keys in each `meta`, comma-joined (`"gift_message,_configuration"`) | every allowed key |
 
 ### Get a Single Order
 
@@ -170,7 +170,7 @@ order.GetString("payment.title", "")    // "Credit card"
 order.Get("payment.needs_payment")      // true while it can still be paid
 order.Get("delivery.downloads")         // the files this order can download
 
-order, err = client.Account().GetOrder(ctx, 1042, map[string]any{"formatted": true})
+order, err = client.Account().GetOrder(ctx, 1042, map[string]string{"formatted": "true"})
 ```
 
 Someone else's order, or one that doesn't exist, is `404 cocart_order_not_found`.
@@ -249,7 +249,7 @@ An expired or wrong key is `400 cocart_invalid_or_expired_key`; an email already
 Needs WooCommerce Subscriptions.
 
 ```go
-list, err := client.Account().GetSubscriptions(ctx, map[string]any{"status": "active", "per_page": 10})
+list, err := client.Account().GetSubscriptions(ctx, map[string]string{"status": "active", "per_page": "10"})
 one, err := client.Account().GetSubscription(ctx, 512)
 
 client.Account().SuspendSubscription(ctx, 512)
@@ -262,7 +262,7 @@ client.Account().Resubscribe(ctx, 512)
 client.Account().CancelResubscribe(ctx, 512)
 ```
 
-`GetSubscriptions` takes `page`, `per_page`, `order`, `status` (one, or a `[]string`), `formatted` and `meta_keys`, and returns `subscriptions` with `pagination`. Each change returns the subscription with what happened in `result`. A change the subscription's state refuses is a `409` (e.g. `cocart_subscription_cannot_suspend`).
+`GetSubscriptions` takes `page`, `per_page`, `order`, `status` (one, or several comma-joined), `formatted` and `meta_keys`, and returns `subscriptions` with `pagination`. Each change returns the subscription with what happened in `result`. A change the subscription's state refuses is a `409` (e.g. `cocart_subscription_cannot_suspend`).
 
 ## Changing a Subscription's Payment Method
 

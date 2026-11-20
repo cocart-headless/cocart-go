@@ -202,42 +202,22 @@ func withPaymentDataPairs(input map[string]any) map[string]any {
 	return body
 }
 
-// queryOf turns optional query parameters into the strings the API takes,
-// leaving out nil values: a list is comma-joined, and a boolean is "true" or
-// "false".
-func queryOf(params map[string]any) map[string]string {
-	query := make(map[string]string, len(params))
-	for k, v := range params {
-		switch value := v.(type) {
-		case nil:
-			continue
-		case string:
-			query[k] = value
-		case []string:
-			query[k] = strings.Join(value, ",")
-		case []any:
-			parts := make([]string, len(value))
-			for i, part := range value {
-				parts[i] = fmt.Sprint(part)
-			}
-			query[k] = strings.Join(parts, ",")
-		case bool:
-			query[k] = strconv.FormatBool(value)
-		case float64:
-			query[k] = strconv.FormatFloat(value, 'f', -1, 64)
-		default:
-			query[k] = fmt.Sprint(value)
-		}
-	}
-	return query
-}
-
 // firstParams returns the first of a method's optional parameter maps, or nil.
-func firstParams(params []map[string]any) map[string]any {
+func firstParams(params []map[string]string) map[string]string {
 	if len(params) > 0 {
 		return params[0]
 	}
 	return nil
+}
+
+// copyQuery returns a copy of query parameters, so adding to it never
+// changes the caller's map.
+func copyQuery(params map[string]string) map[string]string {
+	query := make(map[string]string, len(params)+1)
+	for k, v := range params {
+		query[k] = v
+	}
+	return query
 }
 
 func textOf(v any) string {
@@ -356,8 +336,8 @@ func (c *Client) Checkout() *CheckoutEndpoint {
 // remembers the total it showed, and refuses the order if the total has
 // changed by then (409 cocart_checkout_total_mismatch). Don't call it just
 // before placing the order.
-func (e *CheckoutEndpoint) Get(ctx context.Context, params ...map[string]any) (*Response, error) {
-	return e.client.RequestRaw(ctx, http.MethodGet, checkoutRoute, queryOf(firstParams(params)), nil)
+func (e *CheckoutEndpoint) Get(ctx context.Context, params ...map[string]string) (*Response, error) {
+	return e.client.RequestRaw(ctx, http.MethodGet, checkoutRoute, copyQuery(firstParams(params)), nil)
 }
 
 // Update saves addresses, the shipping method, the payment method, a coupon
@@ -581,10 +561,10 @@ func (e *CheckoutEndpoint) GetAddressDetails(ctx context.Context, addressID, pro
 
 // GetOrderReceived returns the order, for the thank-you page. orderKey must
 // match the order's key; a wrong key, or someone else's order, is 404
-// cocart_order_not_found. params optionally takes formatted and meta_keys (a
-// []string).
-func (e *CheckoutEndpoint) GetOrderReceived(ctx context.Context, orderID int, orderKey string, params ...map[string]any) (*Response, error) {
-	query := queryOf(firstParams(params))
+// cocart_order_not_found. params optionally takes formatted ("true") and
+// meta_keys (comma-joined).
+func (e *CheckoutEndpoint) GetOrderReceived(ctx context.Context, orderID int, orderKey string, params ...map[string]string) (*Response, error) {
+	query := copyQuery(firstParams(params))
 	query["order_key"] = orderKey
 	return e.client.RequestRaw(ctx, http.MethodGet, fmt.Sprintf("%s/order-received/%d", checkoutAPI, orderID), query, nil)
 }

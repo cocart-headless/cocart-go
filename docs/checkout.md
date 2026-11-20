@@ -147,7 +147,7 @@ checkout.Get("delivery.packages")         // each package with its "rates" and "
 checkout.Get("actions")                   // what can be done next
 
 // Optional parameters: another currency, amounts formatted for display, no product thumbnails
-checkout, err = client.Checkout().Get(ctx, map[string]any{"currency": "EUR", "formatted": true, "thumb": false})
+checkout, err = client.Checkout().Get(ctx, map[string]string{"currency": "EUR", "formatted": "true", "thumb": "false"})
 ```
 
 Save what the customer has entered so far, without placing the order. It returns the checkout, with what it did in `result`:
@@ -391,9 +391,9 @@ order.Get("total_lines")              // [{key, label, amount, detail}] in displ
 order.Get("payment.needs_payment")    // true if the customer still has to pay
 
 // Amounts formatted for display, and only the meta keys you need
-order, err = client.Checkout().GetOrderReceived(ctx, orderID, orderKey, map[string]any{
-	"formatted": true,
-	"meta_keys": []string{"gift_message"},
+order, err = client.Checkout().GetOrderReceived(ctx, orderID, orderKey, map[string]string{
+	"formatted": "true",
+	"meta_keys": "gift_message",
 })
 ```
 
