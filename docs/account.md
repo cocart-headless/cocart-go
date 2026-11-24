@@ -17,7 +17,7 @@ account := client.Account()
 
 ## How Responses Look
 
-Every account response is a document that says what it is in `object` (`customer`, `order`, `subscription`…). A request that changes something puts what it did first, in `result`: a `code` to branch on and a `message` for the customer. `actions` lists what can be done next, keyed by action, each with a `label`, `method` and `href`.
+Every account response is a document that says what it is in `object` (`customer`, `order`, `subscription`…). A request that changes something puts what it did first, in `result`: a `code` to branch on and a `message` for the customer. An order or subscription has `allowed_actions`: what the customer may do with it now, as a list of names (e.g. `pay`, `cancel`, `suspend`).
 
 Amounts are minor-unit strings (`"4999"`), as in the cart. Methods that read a document take optional parameters as a `map[string]string`: `"formatted": "true"` for amounts ready to display (`"$49.99"`), and `"meta_keys"` (comma-joined, e.g. `"gift_message,_configuration"`) to narrow the order or customer `meta` to the keys you need.
 
@@ -60,7 +60,7 @@ The response is the new customer, as `GetProfile` gives it. The username and pas
 
 ### Get Profile
 
-The signed-in customer: name, email, addresses, what they've bought and what they can do next.
+The signed-in customer: name, email, addresses and what they've bought.
 
 ```go
 customer, err := client.Account().GetProfile(ctx)
@@ -71,7 +71,7 @@ customer.Get("pending_email")                  // a new email waiting to be conf
 customer.GetInt("stats.orders_count", 0)       // 14
 customer.GetString("stats.total_spent", "")    // "32000" (minor units)
 customer.GetString("billing.formatted", "")    // the billing address on one line
-customer.Get("related.recent_order")           // the most recent order, or nil
+customer.Get("recent_orders")                  // the 5 most recent orders, newest first: [{id, number, status, date_created, total, href}], [] when none
 
 // Amounts ready to display, and only the meta keys you need
 customer, err = client.Account().GetProfile(ctx, map[string]string{"formatted": "true", "meta_keys": "loyalty_tier"})
@@ -131,8 +131,9 @@ response, err := client.Account().GetOrders(ctx, nil)
 orders, _ := response.Get("orders").([]any)
 for _, o := range orders {
 	order := o.(map[string]any)
-	fmt.Println(order["id"], order["number"])
-	fmt.Println(order["status"].(map[string]any)["code"]) // "completed" (use this in code; "label" is for display)
+	fmt.Println(order["id"], order["number"], order["total"]) // total in minor units: "2300"
+	fmt.Println(order["status"].(map[string]any)["code"])     // "completed" (use this in code; "label" is for display)
+	fmt.Println(order["allowed_actions"])                     // what the customer may do now: [pay cancel], or []
 }
 response.GetInt("pagination.total_items", 0)
 response.GetTotalPages()
@@ -158,17 +159,21 @@ response, err = client.Account().GetOrders(ctx, map[string]string{
 
 ### Get a Single Order
 
-The whole order: what was bought, the totals as lines to display, the payment, the customer, the delivery (shipping lines and downloads), notes and what can be done next.
+The whole order: what was bought, the totals as lines to display, the payment, the customer, the delivery (its shipping lines), the files it can download, notes, the parent order and what the customer may do with it now (`allowed_actions`).
 
 ```go
 order, err := client.Account().GetOrder(ctx, 1042)
 
 order.GetString("status.code", "")      // "completed"
 order.Get("items")                      // each line with its product, quantity, price and totals
+order.Get("items.0.details")            // [{label, value}] to print under the item: [{"label": "Size", "value": "L"}]
 order.Get("total_lines")                // [{key, label, amount, detail}] in display order
 order.GetString("payment.title", "")    // "Credit card"
 order.Get("payment.needs_payment")      // true while it can still be paid
-order.Get("delivery.downloads")         // the files this order can download
+order.Get("delivery.shipping_lines")    // [{title, total, tax}]
+order.Get("downloads")                  // the files this order can download
+order.Get("parent_order")               // {id, number, href}, or nil
+order.Get("allowed_actions")            // e.g. ["pay", "cancel"], or [] when there's nothing to do
 
 order, err = client.Account().GetOrder(ctx, 1042, map[string]string{"formatted": "true"})
 ```
@@ -198,14 +203,13 @@ An order that can't be cancelled is `409 cocart_order_cannot_be_cancelled`.
 
 ### All Downloads
 
-Every file the customer can download, across all orders, as `{"downloads": [...]}`:
+Every file the customer can download, across all orders, as a list:
 
 ```go
 response, err := client.Account().GetDownloads(ctx)
 
-downloads, _ := response.Get("downloads").([]any)
-for _, d := range downloads {
-	file := d.(map[string]any)
+downloads, err := cocart.Unmarshal[[]map[string]any](response)
+for _, file := range downloads {
 	fmt.Println(file["name"], file["downloads_remaining"], file["href"]) // downloads_remaining is nil when unlimited
 }
 ```

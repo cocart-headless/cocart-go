@@ -144,7 +144,6 @@ checkout.Get("payment.needs_payment")     // false when the order is free
 checkout.Get("customer.billing")          // the addresses, each with "formatted"
 checkout.Get("delivery.needs_shipping")
 checkout.Get("delivery.packages")         // each package with its "rates" and "chosen_rate"
-checkout.Get("actions")                   // what can be done next
 
 // Optional parameters: another currency, amounts formatted for display, no product thumbnails
 checkout, err = client.Checkout().Get(ctx, map[string]string{"currency": "EUR", "formatted": "true", "thumb": "false"})
@@ -186,13 +185,12 @@ config.Get("store.terms_url")                    // or nil without the page
 config.Get("store.privacy_url")                  // or nil without the page
 ```
 
-The payment methods for this cart, as `{"payment_methods": [...]}`:
+The payment methods for this cart, as a list:
 
 ```go
-methods, err := client.Checkout().GetPaymentMethods(ctx)
-list, _ := methods.Get("payment_methods").([]any)
-for _, m := range list {
-	method := m.(map[string]any)
+response, err := client.Checkout().GetPaymentMethods(ctx)
+methods, err := cocart.Unmarshal[[]map[string]any](response)
+for _, method := range methods {
 	fmt.Println(method["id"], method["title"]) // stripe Credit card
 }
 ```

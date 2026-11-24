@@ -189,7 +189,7 @@ func TestAccountOrderDownloads(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newRecordingServer(t)
-			s.queue(200, `{"downloads":[{"download_id":"abc","download_name":"Guide"}]}`)
+			s.queue(200, `[{"id":"abc","name":"Guide.pdf","downloads_remaining":3,"expires":null,"product":{"id":15,"name":"Guide"},"order":{"id":123,"number":"123"},"href":"https://example.com/?download_file=15"}]`)
 			resp, err := tt.call(context.Background(), NewClient(s.URL).Account())
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -202,7 +202,7 @@ func TestAccountOrderDownloads(t *testing.T) {
 				t.Errorf("query = %s, want %s", got, tt.query)
 			}
 			// Returned as sent.
-			if string(resp.Body) != `{"downloads":[{"download_id":"abc","download_name":"Guide"}]}` {
+			if string(resp.Body) != `[{"id":"abc","name":"Guide.pdf","downloads_remaining":3,"expires":null,"product":{"id":15,"name":"Guide"},"order":{"id":123,"number":"123"},"href":"https://example.com/?download_file=15"}]` {
 				t.Errorf("body = %s", resp.Body)
 			}
 		})

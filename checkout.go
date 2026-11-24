@@ -328,9 +328,9 @@ func (c *Client) Checkout() *CheckoutEndpoint {
 }
 
 // Get returns the checkout as it stands, like a receipt: items, coupons,
-// fees, totals and total_lines, the payment method, the addresses, each
-// shipping package with its rates, and actions. params optionally takes
-// currency, formatted and thumb.
+// fees, totals and total_lines, the payment method, the addresses, and each
+// shipping package with its rates. params optionally takes currency,
+// formatted and thumb.
 //
 // Call it for the page the customer reviews before paying: CoCart Plus
 // remembers the total it showed, and refuses the order if the total has
@@ -498,8 +498,8 @@ func (e *CheckoutEndpoint) GetConfig(ctx context.Context) (*Response, error) {
 	return e.client.RequestRaw(ctx, http.MethodGet, checkoutRoute+"/config", nil, nil)
 }
 
-// GetPaymentMethods returns the payment methods for this cart, as
-// {"payment_methods": [...]}, each with its saved_tokens.
+// GetPaymentMethods returns the payment methods for this cart: a list, each
+// with its saved_tokens. Read it with Unmarshal[[]map[string]any].
 func (e *CheckoutEndpoint) GetPaymentMethods(ctx context.Context) (*Response, error) {
 	return e.client.RequestRaw(ctx, http.MethodGet, checkoutRoute+"/payment-methods", nil, nil)
 }
@@ -513,7 +513,7 @@ func (e *CheckoutEndpoint) GetSavedPaymentMethods(ctx context.Context, gatewayID
 	if err != nil {
 		return nil, err
 	}
-	methods, _ := resp.ToObject()["payment_methods"].([]any)
+	methods, _ := Unmarshal[[]any](resp)
 
 	cards := []SavedPaymentMethod{}
 	for _, m := range methods {

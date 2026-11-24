@@ -77,9 +77,8 @@ func (e *AccountEndpoint) Register(ctx context.Context, customer RegisterCustome
 
 // --- Profile ---
 
-// GetProfile returns the signed-in customer: name, email, addresses, order
-// stats and actions. params optionally takes formatted and meta_keys (a
-// []string).
+// GetProfile returns the signed-in customer: name, email, addresses and order
+// stats. params optionally takes formatted and meta_keys (a []string).
 func (e *AccountEndpoint) GetProfile(ctx context.Context, params ...map[string]string) (*Response, error) {
 	return e.doRawGet(ctx, "", documentQuery(firstParams(params)))
 }
@@ -147,18 +146,18 @@ func (e *AccountEndpoint) CancelOrder(ctx context.Context, id int) (*Response, e
 // --- Downloads ---
 
 // GetOrderDownloads returns the files one of the customer's orders can
-// download, as sent: {"downloads": [...]}.
+// download, as sent: a list. Read it with Unmarshal[[]map[string]any].
 func (e *AccountEndpoint) GetOrderDownloads(ctx context.Context, id int) (*Response, error) {
 	return e.doRawGet(ctx, fmt.Sprintf("orders/%d/downloads", id), nil)
 }
 
 // GetGuestOrderDownloads returns the files a guest's order can download,
-// looked up with its billing email, as sent: {"downloads": [...]}.
+// looked up with its billing email, as sent: a list.
 func (e *AccountEndpoint) GetGuestOrderDownloads(ctx context.Context, id int, email string) (*Response, error) {
 	return e.doRawGet(ctx, fmt.Sprintf("orders/%d/downloads", id), map[string]string{"email": email})
 }
 
-// GetDownloads returns every file the customer can download: {"downloads": [...]}.
+// GetDownloads returns every file the customer can download, as a list.
 func (e *AccountEndpoint) GetDownloads(ctx context.Context) (*Response, error) {
 	return e.doRawGet(ctx, "downloads", nil)
 }
